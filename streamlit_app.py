@@ -62,14 +62,23 @@ def dropoff_time(lower, upper):
     return random.uniform(lower, upper)
 
 
+def departure_time(mean_minutes):
+    # Once the parking duration ends, the car takes a random amount of time to
+    # leave the parking area. The departure delay is sampled from a Poisson
+    # distribution using the configured mean in minutes.
+    return max(1.0, float(np.random.poisson(mean_minutes)))
+
+
 def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
-        wait_until_close, parked_cars):
+    departure_mean, wait_until_close, parked_cars):
     # A car is introduced at its actual arrival time. It then occupies a parking
     # space immediately. If the departure is limited until gate closing, the car
     # stays parked until the gate closes even if its parking duration would have
-    # ended earlier.
+    # ended earlier. The final departure phase also takes a configurable amount of
+    # time before the car is removed from the occupied count.
     parked_cars["count"] += 1
     parking_duration = dropoff_time(drop_lower, drop_upper)
+    departure_duration = departure_time(departure_mean)
     if wait_until_close:
         gate_departure = gate_close
         if env.now + parking_duration < gate_departure:
@@ -78,12 +87,13 @@ def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
             yield env.timeout(max(0, gate_departure - env.now))
     else:
         yield env.timeout(parking_duration)
+    yield env.timeout(departure_duration)
     parked_cars["count"] -= 1
 
 
 def arrival_process(env, open_time, close_time, minutes_before_open,
-                    drop_lower, drop_upper, total_cars, wait_until_close,
-                    parked_cars):
+                    drop_lower, drop_upper, departure_mean, total_cars,
+                    wait_until_close, parked_cars):
     # Create the schedule of when each car should arrive. The arrivals are sorted
     # so the queue looks realistic. The arrival window is explicitly:
     #   [gate_open - arrival_window, gate_close]
@@ -96,7 +106,8 @@ def arrival_process(env, open_time, close_time, minutes_before_open,
         yield env.timeout(target_arrival - env.now)
         env.process(car(
             env, f"Car{car_id}", open_time, close_time,
-            drop_lower, drop_upper, wait_until_close, parked_cars))
+            drop_lower, drop_upper, departure_mean, wait_until_close,
+            parked_cars))
 
 
 def parked_cars_monitor(env, parked_cars, parked_log, interval=0.2):
@@ -108,7 +119,8 @@ def parked_cars_monitor(env, parked_cars, parked_log, interval=0.2):
 
 
 def run_sim(open_time, close_time, minutes_before_open, drop_lower,
-            drop_upper, sim_duration, total_cars, wait_until_close):
+            drop_upper, departure_mean, sim_duration, total_cars,
+            wait_until_close):
     # Build a single simulation run and return the occupancy history. This is the
     # basic model used for one random sample.
     env = simpy.Environment()
@@ -116,15 +128,16 @@ def run_sim(open_time, close_time, minutes_before_open, drop_lower,
     parked_log = []
     env.process(arrival_process(
         env, open_time, close_time, minutes_before_open,
-        drop_lower, drop_upper, total_cars, wait_until_close, parked_cars))
+        drop_lower, drop_upper, departure_mean, total_cars,
+        wait_until_close, parked_cars))
     env.process(parked_cars_monitor(env, parked_cars, parked_log))
     env.run(until=sim_duration)
     return parked_log
 
 
 def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
-                    drop_lower, drop_upper, total_cars, sim_duration,
-                    wait_until_close):
+                    drop_lower, drop_upper, departure_mean, total_cars,
+                    sim_duration, wait_until_close):
     # Repeat the random simulation many times, retain all runs, and choose the
     # one whose peak parking count is closest to the median peak. This keeps a
     # stable central line while also allowing the full Monte Carlo spread to be
@@ -133,7 +146,8 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
     for _ in range(iterations):
         parked_log = run_sim(
             open_time, close_time, minutes_before_open, drop_lower,
-            drop_upper, sim_duration, total_cars, wait_until_close)
+            drop_upper, departure_mean, sim_duration, total_cars,
+            wait_until_close)
         maximum_parked = max(parked for time_value, parked in parked_log)
         runs.append((parked_log, maximum_parked))
     if not runs:
@@ -179,9 +193,10 @@ def visualizer_fonts():
 
 
 def create_cars(total_cars, gate_open, gate_close, arrival_window,
-                drop_lower, drop_upper, seed):
+                drop_lower, drop_upper, departure_mean, seed):
     # Generate the data for each car in the visual simulation: when it arrives,
-    # how long it stays parked, and where to draw it on the screen.
+    # how long it stays parked, how long it takes to clear the space, and where
+    # to draw it on the screen.
     rng = random.Random(seed)
     arrival_start = max(0, gate_open - arrival_window)
     arrivals = sorted(
@@ -192,6 +207,8 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
         cars.append({
             "arrival": arrival,
             "duration": rng.uniform(drop_lower, drop_upper),
+            "departure_time": max(1.0, float(np.random.poisson(departure_mean))),
+            "walk_time": PERSON_WALK_MINUTES,
             "x": ROAD_RECT[0] + 35 + (index % 12) * 58,
             "y": ROAD_RECT[1] + 45 + (index // 12) * 42,
         })
@@ -200,13 +217,16 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
 
 def car_times(car_data, gate_open, gate_close, wait_until_close):
     # A car starts parking immediately when it arrives. If departure is limited,
-    # the car remains parked until the gate closes before leaving.
+    # the car remains parked until the gate closes before leaving. The vehicle
+    # then spends a configurable departure interval before the person walks to
+    # the gate.
     arrival = car_data["arrival"]
     parked_end = arrival + car_data["duration"]
     if wait_until_close:
         parked_end = max(parked_end, gate_close)
-    person_through = parked_end + PERSON_WALK_MINUTES
-    return arrival, parked_end, person_through
+    departure_end = parked_end + car_data["departure_time"]
+    person_through = departure_end + car_data["walk_time"]
+    return arrival, parked_end, departure_end, person_through
 
 
 def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
@@ -222,7 +242,7 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
     parked_count = 0
     people_through = 0
     for car_data in cars:
-        arrival, parked_end, person_through = car_times(
+        arrival, parked_end, departure_end, person_through = car_times(
             car_data, gate_open, gate_close, wait_until_close)
         if elapsed < arrival:
             continue
@@ -238,8 +258,8 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
             int(car_data["x"] - 21), int(car_data["y"] - 11),
             int(car_data["x"] + 21), int(car_data["y"] + 11))
         draw.rounded_rectangle(car_rect, radius=5, fill=colour, outline=TEXT, width=2)
-        if parked_end <= elapsed < person_through:
-            progress = (elapsed - parked_end) / PERSON_WALK_MINUTES
+        if departure_end <= elapsed < person_through:
+            progress = (elapsed - departure_end) / car_data["walk_time"]
             person_x = car_data["x"] + (gate_x - car_data["x"]) * progress
             draw.ellipse(
                 (int(person_x - 6), int(car_data["y"] - 6),
@@ -288,6 +308,7 @@ def render_visualizer_tab():
         "comparison_arrival_window",
         "comparison_simulation_start",
         "comparison_simulation_end",
+        "comparison_departure_mean",
     ]
     missing = [key for key in required_keys if key not in st.session_state]
     if missing:
@@ -300,22 +321,24 @@ def render_visualizer_tab():
     arrival_window = st.session_state["comparison_arrival_window"]
     simulation_start = st.session_state["comparison_simulation_start"]
     simulation_end = st.session_state["comparison_simulation_end"]
+    departure_mean = st.session_state["comparison_departure_mean"]
     drop_lower = scenario["lower"]
     drop_upper = scenario["upper"]
     gate_open = time_to_minutes(scenario["open"]) - time_to_minutes(simulation_start)
     gate_close = time_to_minutes(scenario["close"]) - time_to_minutes(simulation_start)
     wait_until_close = scenario["wait_until_close"]
-    seed = st.number_input("Random seed", min_value=0, value=7, step=1)
+    seed = st.number_input("Random seed", min_value=0, value=42, step=1)
 
     st.caption(
         f"{selected_name}: parking {drop_lower:g}-{drop_upper:g} minutes, "
+        f"car departure mean {departure_mean:g} minutes, "
         f"gate {scenario['open'].strftime('%H:%M')}-{scenario['close'].strftime('%H:%M')}, "
         f"{'departure held until closing' if wait_until_close else 'departure at opening'}.")
 
     if st.button("Run visualization", type="primary"):
         cars = create_cars(
             total_cars, gate_open, gate_close, arrival_window,
-            drop_lower, drop_upper, seed)
+            drop_lower, drop_upper, departure_mean, seed)
         fonts = visualizer_fonts()
         frame_slot, chart_slot = st.columns(2)
         frame_output = frame_slot.empty()
@@ -349,20 +372,23 @@ def render_comparison_tab():
     # whether cars wait until the gate closes before leaving.
     st.header("Two-Scenario Comparison")
     st.write("Compare parked-car occupancy for two scenarios using Monte Carlo median runs.")
-    iterations = st.number_input("Monte Carlo iterations", min_value=1, value=500, step=1,
+    iterations = st.number_input("Monte Carlo iterations", min_value=1, value=100, step=1,
                                  key="comparison_iterations")
     st.subheader("Shared Settings")
-    shared = st.columns(4)
+    shared = st.columns(5)
     total_cars = shared[0].number_input("Total number of cars", min_value=1, value=55, step=1,
-                                        key="comparison_total_cars")
+                                        key="comparison_total_cars")s
     arrival_window = shared[1].number_input("Arrival window before gate opening (minutes)",
                                             min_value=0, value=10, step=1,
                                             key="comparison_arrival_window")
-    simulation_start = shared[2].slider("Simulation start time", min_value=time(8, 0),
+    departure_mean = shared[2].number_input("Car departure mean (minutes)",
+                                            min_value=1, max_value=10, value=3, step=1,
+                                            key="comparison_departure_mean")
+    simulation_start = shared[3].slider("Simulation start time", min_value=time(8, 0),
                                         max_value=time(9, 30), value=time(8, 30),
                                         step=timedelta(minutes=15), format="HH:mm",
                                         key="comparison_simulation_start")
-    simulation_end = shared[3].slider("Simulation end time", min_value=time(8, 0),
+    simulation_end = shared[4].slider("Simulation end time", min_value=time(8, 0),
                                       max_value=time(9, 30), value=time(9, 15),
                                       step=timedelta(minutes=15), format="HH:mm",
                                       key="comparison_simulation_end")
@@ -372,12 +398,12 @@ def render_comparison_tab():
     values = []
     for index, column in enumerate((scenario_1_col, scenario_2_col), start=1):
         with column:
-            default_name = "old" if index == 1 else "new"
-            default_lower = 1 if index == 1 else 5
-            default_upper = 3 if index == 1 else 10
-            default_open = time(8, 50) if index == 1 else time(8, 40)
-            default_close = time(9, 0) if index == 1 else time(8, 50)
-            default_wait = index == 2
+            default_name = "drop and wait" if index == 1 else "drop and run"
+            default_lower = 3 if index == 1 else 3
+            default_upper = 7 if index == 1 else 7
+            default_open = time(8, 40) if index == 1 else time(8, 40)
+            default_close = time(8, 50) if index == 1 else time(8, 50)
+            default_wait = index == 1
             name = st.text_input(f"Scenario {index} name", value=default_name,
                                  key=f"comparison_name_{index}")
             lower = st.slider("Parking duration LOWER bound (minutes)", 1, 5, default_lower,
@@ -433,7 +459,8 @@ def render_comparison_tab():
         for name, lower, upper, open_minutes, close_minutes, wait_until_close in scenarios:
             median_run, all_runs = run_monte_carlo(
                 iterations, open_minutes, close_minutes, arrival_window,
-                lower, upper, total_cars, sim_duration, wait_until_close)
+                lower, upper, departure_mean, total_cars,
+                sim_duration, wait_until_close)
             if median_run is None:
                 continue
             median_log, maximum = median_run
@@ -474,6 +501,14 @@ def render_comparison_tab():
 
 st.set_page_config(page_title="School Drop-Off Models", layout="wide")
 st.title("School Drop-Off Models")
+st.info(
+    "**Model summary:** Cars arrive at random times from the gate opening time "
+    "minus the arrival window through gate closing. Each car stays for a randomly "
+    "sampled parking duration, then its departure delay is sampled from a Poisson "
+    "distribution using the shared departure mean. The comparison tab repeats "
+    "this process with Monte Carlo simulations and shows a representative central "
+    "occupancy run with 20th- and 80th-percentile bounds."
+)
 comparison_tab, visualizer_tab = st.tabs(["Two-scenario comparison", "Visualisation"])
 with comparison_tab:
     render_comparison_tab()
