@@ -283,6 +283,17 @@ def render_visualizer_tab():
         st.info("Configure scenarios in the comparison tab first.")
         return
 
+    required_keys = [
+        "comparison_total_cars",
+        "comparison_arrival_window",
+        "comparison_simulation_start",
+        "comparison_simulation_end",
+    ]
+    missing = [key for key in required_keys if key not in st.session_state]
+    if missing:
+        st.info("Configure the comparison settings first, then return to the visualiser.")
+        return
+
     selected_name = st.selectbox("Scenario to visualise", list(scenarios))
     scenario = scenarios[selected_name]
     total_cars = st.session_state["comparison_total_cars"]
