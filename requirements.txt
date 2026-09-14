@@ -2,4 +2,3 @@ streamlit
 simpy
 matplotlib
 numpy
-pygame

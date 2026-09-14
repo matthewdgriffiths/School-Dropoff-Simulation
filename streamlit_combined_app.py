@@ -1,16 +1,12 @@
-import io
-import os
 import random
 
 import matplotlib.pyplot as plt
 import numpy as np
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-import pygame
 import simpy
 import streamlit as st
 from datetime import time, timedelta
 from matplotlib.ticker import FuncFormatter
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 
 # -----------------------------
@@ -18,7 +14,7 @@ from PIL import Image
 # -----------------------------
 
 WINDOW_SIZE = (800, 520)
-ROAD_RECT = pygame.Rect(40, 80, 720, 370)
+ROAD_RECT = (40, 80, 760, 450)
 BACKGROUND = (24, 29, 38)
 ROAD = (49, 58, 69)
 ROAD_EDGE = (130, 143, 157)
@@ -108,13 +104,12 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
 
 
 # -----------------------------
-# Pygame visualizer
+# Streamlit visualizer
 # -----------------------------
 
 @st.cache_resource
-def pygame_fonts():
-    pygame.init()
-    return pygame.font.Font(None, 28), pygame.font.Font(None, 22)
+def visualizer_fonts():
+    return ImageFont.load_default(), ImageFont.load_default()
 
 
 def create_cars(total_cars, gate_open, gate_close, arrival_window,
@@ -128,8 +123,8 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
         cars.append({
             "arrival": arrival,
             "duration": rng.uniform(drop_lower, drop_upper),
-            "x": ROAD_RECT.left + 35 + (index % 12) * 58,
-            "y": ROAD_RECT.top + 45 + (index // 12) * 42,
+            "x": ROAD_RECT[0] + 35 + (index % 12) * 58,
+            "y": ROAD_RECT[1] + 45 + (index // 12) * 42,
         })
     return cars
 
@@ -144,15 +139,12 @@ def car_times(car_data, gate_open, gate_close, wait_until_close):
 
 def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
                  start_time, fonts):
-    surface = pygame.Surface(WINDOW_SIZE)
-    surface.fill(BACKGROUND)
-    pygame.draw.rect(surface, ROAD, ROAD_RECT, border_radius=8)
-    pygame.draw.rect(surface, ROAD_EDGE, ROAD_RECT, width=3, border_radius=8)
-    gate_x = ROAD_RECT.right - 28
-    pygame.draw.line(surface, GATE, (gate_x, ROAD_RECT.top),
-                     (gate_x, ROAD_RECT.bottom), width=8)
-    surface.blit(fonts[1].render("GATE", True, GATE),
-                 (gate_x - 28, ROAD_RECT.top - 26))
+    surface = Image.new("RGB", WINDOW_SIZE, BACKGROUND)
+    draw = ImageDraw.Draw(surface)
+    draw.rounded_rectangle(ROAD_RECT, radius=8, fill=ROAD, outline=ROAD_EDGE, width=3)
+    gate_x = ROAD_RECT[2] - 28
+    draw.line((gate_x, ROAD_RECT[1], gate_x, ROAD_RECT[3]), fill=GATE, width=8)
+    draw.text((gate_x - 28, ROAD_RECT[1] - 26), "GATE", font=fonts[1], fill=GATE)
 
     parked_count = 0
     people_through = 0
@@ -171,23 +163,24 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
             parked_count += 1
         else:
             colour = LEAVING
-        car_rect = pygame.Rect(
-            int(car_data["x"] - 21), int(car_data["y"] - 11), 42, 22)
-        pygame.draw.rect(surface, colour, car_rect, border_radius=5)
-        pygame.draw.rect(surface, TEXT, car_rect, width=2, border_radius=5)
+        car_rect = (
+            int(car_data["x"] - 21), int(car_data["y"] - 11),
+            int(car_data["x"] + 21), int(car_data["y"] + 11))
+        draw.rounded_rectangle(car_rect, radius=5, fill=colour, outline=TEXT, width=2)
         if parked_end <= elapsed < person_through:
             progress = (elapsed - parked_end) / PERSON_WALK_MINUTES
             person_x = car_data["x"] + (gate_x - car_data["x"]) * progress
-            pygame.draw.circle(
-                surface, PERSON, (int(person_x), int(car_data["y"])), 6)
+            draw.ellipse(
+                (int(person_x - 6), int(car_data["y"] - 6),
+                 int(person_x + 6), int(car_data["y"] + 6)), fill=PERSON)
 
-    surface.blit(fonts[0].render("School Drop-Off Parking", True, TEXT), (40, 25))
-    status = fonts[1].render(
+    draw.text((40, 25), "School Drop-Off Parking", font=fonts[0], fill=TEXT)
+    draw.text(
+        (40, 55),
         f"Time: {format_clock_time(start_time, elapsed)}   Parked: {parked_count}   "
-        f"People through gate: {people_through}", True, TEXT)
-    surface.blit(status, (40, 55))
-    raw = pygame.image.tostring(surface, "RGB")
-    return Image.frombytes("RGB", WINDOW_SIZE, raw), parked_count, people_through
+        f"People through gate: {people_through}",
+        font=fonts[1], fill=TEXT)
+    return surface, parked_count, people_through
 
 
 def make_visualizer_chart(history, simulation_start):
@@ -239,7 +232,7 @@ def render_visualizer_tab():
         cars = create_cars(
             total_cars, gate_open, gate_close, arrival_window,
             drop_lower, drop_upper, seed)
-        fonts = pygame_fonts()
+        fonts = visualizer_fonts()
         frame_slot, chart_slot = st.columns(2)
         frame_output = frame_slot.empty()
         chart_output = chart_slot.empty()
@@ -386,7 +379,7 @@ def render_comparison_tab():
 
 st.set_page_config(page_title="School Drop-Off Models", layout="wide")
 st.title("School Drop-Off Models")
-comparison_tab, visualizer_tab = st.tabs(["Two-scenario comparison", "Pygame visualisation"])
+comparison_tab, visualizer_tab = st.tabs(["Two-scenario comparison", "Visualisation"])
 with comparison_tab:
     render_comparison_tab()
 with visualizer_tab:
