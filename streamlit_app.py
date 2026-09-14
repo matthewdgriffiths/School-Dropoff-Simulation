@@ -377,7 +377,7 @@ def render_comparison_tab():
     st.subheader("Shared Settings")
     shared = st.columns(5)
     total_cars = shared[0].number_input("Total number of cars", min_value=1, value=55, step=1,
-                                        key="comparison_total_cars")s
+                                        key="comparison_total_cars")
     arrival_window = shared[1].number_input("Arrival window before gate opening (minutes)",
                                             min_value=0, value=10, step=1,
                                             key="comparison_arrival_window")
