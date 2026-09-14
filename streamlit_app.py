@@ -79,14 +79,12 @@ def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
     parked_cars["count"] += 1
     parking_duration = dropoff_time(drop_lower, drop_upper)
     departure_duration = departure_time(departure_mean)
+    # Nobody can leave before the gate opens. When departure is limited, cars
+    # must remain until the gate closes instead.
+    departure_start = max(env.now + parking_duration, gate_open)
     if wait_until_close:
-        gate_departure = gate_close
-        if env.now + parking_duration < gate_departure:
-            yield env.timeout(gate_departure - env.now)
-        else:
-            yield env.timeout(max(0, gate_departure - env.now))
-    else:
-        yield env.timeout(parking_duration)
+        departure_start = max(departure_start, gate_close)
+    yield env.timeout(max(0, departure_start - env.now))
     yield env.timeout(departure_duration)
     parked_cars["count"] -= 1
 
@@ -216,12 +214,12 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
 
 
 def car_times(car_data, gate_open, gate_close, wait_until_close):
-    # A car starts parking immediately when it arrives. If departure is limited,
-    # the car remains parked until the gate closes before leaving. The vehicle
-    # then spends a configurable departure interval before the person walks to
-    # the gate.
+    # A car starts parking immediately when it arrives. It cannot leave before
+    # the gate opens; if departure is limited, it remains parked until closing.
+    # The vehicle then spends a configurable departure interval before the
+    # person walks to the gate.
     arrival = car_data["arrival"]
-    parked_end = arrival + car_data["duration"]
+    parked_end = max(arrival + car_data["duration"], gate_open)
     if wait_until_close:
         parked_end = max(parked_end, gate_close)
     departure_end = parked_end + car_data["departure_time"]
