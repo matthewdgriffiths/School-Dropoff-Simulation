@@ -1,8 +1,10 @@
 import io
+import os
 import random
 
 import matplotlib.pyplot as plt
 import numpy as np
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 import streamlit as st
 from PIL import Image
