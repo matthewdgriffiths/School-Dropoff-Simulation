@@ -66,10 +66,10 @@ This makes calculations easier because all timing checks are simple numeric comp
 
 `arrival_time(open_time, close_time, minutes_before_open)` generates a random arrival time between:
 
-- a short time before the gate opens, and
-- the gate close time
+- `gate_open - minutes_before_open`, and
+- `gate_close`
 
-This allows the model to represent cars arriving in a realistic queue before the official opening.
+This means cars can begin arriving before the gate opens and continue arriving right through to the closing time. The distribution over this full interval is treated as a Poisson-style arrival process, with the user-specified total number of cars spread across that time window.
 
 ### 3. Random parking duration
 
@@ -84,7 +84,7 @@ The `car(...)` function defines the lifecycle of one car. It does the following:
 - waits for a random drop-off duration
 - decrements the parking count once the car leaves
 
-The `wait_until_close` flag is important. If it is true, cars will not depart until the gate closes; otherwise they can start leaving when the gate opens.
+The `wait_until_close` flag is important. If it is true, cars cannot leave until the gate closes; otherwise they may leave when the gate opens.
 
 ### 5. Arrival process
 
@@ -212,10 +212,12 @@ The general flow is:
 
 The model is intentionally simple and transparent. It focuses on queue dynamics rather than full traffic engineering. Some assumptions include:
 
-- cars arrive in random order within a chosen window
+- cars arrive across the full period from `gate_open - arrival_window` through to `gate_close`
+- the arrival spread is treated as a Poisson-style distribution over that interval, with the specified total car count distributed through it
 - parking durations vary uniformly between lower and upper bounds
 - each car occupies one parking space for the duration of its drop-off
 - persons walk through the gate after parking ends
+- cars remain parked until the gate opens or gate closes depending on the `wait_until_close` setting
 - gate timing is the major constraining factor in the queue
 
 This makes the model suitable for comparing scenarios quickly and clearly, even if it is not a full real-world traffic simulation.

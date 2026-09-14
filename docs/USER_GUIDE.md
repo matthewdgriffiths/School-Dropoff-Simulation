@@ -27,7 +27,7 @@ python3 -m pip install -r requirements.txt
 Run:
 
 ```bash
-python3 -m streamlit run streamlit_combined_app.py
+python3 -m streamlit run streamlit_app.py
 ```
 
 Then open the local URL shown in the terminal, usually:
@@ -94,9 +94,10 @@ The app also displays peak parked-car values for each scenario.
 
 The model is built around a few assumptions:
 
-- cars arrive within a time window before the gate is open
-- each car stays for a random parking duration
-- cars start leaving either at gate opening or gate closing depending on the scenario
+- cars begin arriving `arrival_window` minutes before the gate opens, and can continue arriving until the gate closes
+- the overall arrival pattern is spread throughout that full period using a Poisson-style distribution of car arrivals
+- each car stays for a random parking duration sampled between the chosen lower and upper bounds
+- cars can leave once their parking time ends, unless the "Limit car departure until gate closing" option is checked
 - passengers then walk through the gate after parking ends
 
 This means the results are best used for comparing relative scenarios rather than predicting exact real-world traffic with perfect accuracy.
@@ -160,7 +161,7 @@ python3 -m pip install -r requirements.txt
 Then run:
 
 ```bash
-python3 -m streamlit run streamlit_combined_app.py
+python3 -m streamlit run streamlit_app.py
 ```
 
 ### The charts look strange
@@ -185,6 +186,6 @@ This project is a simple, clear simulation of a school drop-off process. It is d
 
 ## Related project files
 
-- `streamlit_combined_app.py` — main application logic
+- `streamlit_app.py` — main application logic
 - `requirements.txt` — Python dependencies
 - `docs/DEVELOPER_WIKI.md` — deeper technical documentation

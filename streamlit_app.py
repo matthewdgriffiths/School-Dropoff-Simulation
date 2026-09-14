@@ -46,28 +46,38 @@ def format_clock_time(start_time, elapsed_minutes):
 
 
 def arrival_time(open_time, close_time, minutes_before_open):
-    # Cars arrive across the full window from a little before the gate opens to
-    # the gate closing time. This matches the user expectation and keeps the
-    # arrival period continuous.
+    # The full arrival window is:
+    #   [gate_open - arrival_window, gate_close]
+    # So if gate opens at 08:50 and arrival_window = 10, the first cars are
+    # allowed to appear at 08:40 and can continue arriving until the gate closes.
     start_of_window = max(0, open_time - minutes_before_open)
+    if close_time < start_of_window:
+        return start_of_window
     return random.uniform(start_of_window, close_time)
 
 
 def dropoff_time(lower, upper):
-    # Each car stays parked for a random amount of time between the given lower
-    # and upper bounds.
+    # After a car arrives, it remains parked for a random duration sampled from
+    # the lower and upper bounds (in whole minutes in the UI).
     return random.uniform(lower, upper)
 
 
 def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
         wait_until_close, parked_cars):
-    # A single car process. It decides when to leave the queue, occupies a
-    # parking space while dropping passengers off, then frees the space again.
-    departure_time = gate_close if wait_until_close else gate_open
-    if env.now < departure_time:
-        yield env.timeout(departure_time - env.now)
+    # A car is introduced at its actual arrival time. It then occupies a parking
+    # space immediately. If the departure is limited until gate closing, the car
+    # stays parked until the gate closes even if its parking duration would have
+    # ended earlier.
     parked_cars["count"] += 1
-    yield env.timeout(dropoff_time(drop_lower, drop_upper))
+    parking_duration = dropoff_time(drop_lower, drop_upper)
+    if wait_until_close:
+        gate_departure = gate_close
+        if env.now + parking_duration < gate_departure:
+            yield env.timeout(gate_departure - env.now)
+        else:
+            yield env.timeout(max(0, gate_departure - env.now))
+    else:
+        yield env.timeout(parking_duration)
     parked_cars["count"] -= 1
 
 
@@ -75,8 +85,10 @@ def arrival_process(env, open_time, close_time, minutes_before_open,
                     drop_lower, drop_upper, total_cars, wait_until_close,
                     parked_cars):
     # Create the schedule of when each car should arrive. The arrivals are sorted
-    # so the logic reflects a realistic queue rather than all cars appearing at
-    # once.
+    # so the queue looks realistic. The arrival window is explicitly:
+    #   [gate_open - arrival_window, gate_close]
+    # which means a 10-minute window before opening still allows cars to arrive
+    # from 08:40 when the gate opens at 08:50.
     arrival_times = sorted(
         arrival_time(open_time, close_time, minutes_before_open)
         for _ in range(total_cars))
@@ -113,9 +125,10 @@ def run_sim(open_time, close_time, minutes_before_open, drop_lower,
 def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
                     drop_lower, drop_upper, total_cars, sim_duration,
                     wait_until_close):
-    # Repeat the random simulation many times, then keep the run whose peak
-    # parking count is closest to the median peak. This helps reduce random noise
-    # and gives a stable comparison chart.
+    # Repeat the random simulation many times, retain all runs, and choose the
+    # one whose peak parking count is closest to the median peak. This keeps a
+    # stable central line while also allowing the full Monte Carlo spread to be
+    # summarised for percentile bands.
     runs = []
     for _ in range(iterations):
         parked_log = run_sim(
@@ -123,9 +136,32 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
             drop_upper, sim_duration, total_cars, wait_until_close)
         maximum_parked = max(parked for time_value, parked in parked_log)
         runs.append((parked_log, maximum_parked))
+    if not runs:
+        return None, []
     median_maximum = np.median(
         [maximum for parked_log, maximum in runs])
-    return min(runs, key=lambda run: abs(run[1] - median_maximum))
+    median_run = min(runs, key=lambda run: abs(run[1] - median_maximum))
+    return median_run, runs
+
+
+def monte_carlo_percentiles(runs):
+    # Build the 20th and 80th percentile bounds across all Monte Carlo runs for a
+    # given scenario. These are shown as shaded bands around the median line.
+    if not runs:
+        return [], [], []
+    times = sorted({time_value for parked_log, _ in runs for time_value, _ in parked_log})
+    lower = []
+    upper = []
+    for time_value in times:
+        values = [
+            parked for parked_log, _ in runs
+            for log_time, parked in parked_log
+            if abs(log_time - time_value) < 1e-9
+        ]
+        if values:
+            lower.append(np.percentile(values, 20))
+            upper.append(np.percentile(values, 80))
+    return times, lower, upper
 
 
 # -----------------------------
@@ -147,8 +183,9 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
     # Generate the data for each car in the visual simulation: when it arrives,
     # how long it stays parked, and where to draw it on the screen.
     rng = random.Random(seed)
+    arrival_start = max(0, gate_open - arrival_window)
     arrivals = sorted(
-        rng.uniform(max(0, gate_open - arrival_window), gate_close)
+        rng.uniform(arrival_start, gate_close)
         for _ in range(total_cars))
     cars = []
     for index, arrival in enumerate(arrivals):
@@ -162,15 +199,14 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
 
 
 def car_times(car_data, gate_open, gate_close, wait_until_close):
-    # Work out the key moments in a car's journey:
-    # - when it leaves its queue and begins parking
-    # - when it finishes parking and the passengers walk off
-    # - when people have passed through the gate
-    departure = gate_close if wait_until_close else gate_open
-    departure = max(departure, car_data["arrival"])
-    parked_end = departure + car_data["duration"]
+    # A car starts parking immediately when it arrives. If departure is limited,
+    # the car remains parked until the gate closes before leaving.
+    arrival = car_data["arrival"]
+    parked_end = arrival + car_data["duration"]
+    if wait_until_close:
+        parked_end = max(parked_end, gate_close)
     person_through = parked_end + PERSON_WALK_MINUTES
-    return departure, parked_end, person_through
+    return arrival, parked_end, person_through
 
 
 def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
@@ -186,16 +222,14 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
     parked_count = 0
     people_through = 0
     for car_data in cars:
-        departure, parked_end, person_through = car_times(
+        arrival, parked_end, person_through = car_times(
             car_data, gate_open, gate_close, wait_until_close)
-        if elapsed < car_data["arrival"]:
+        if elapsed < arrival:
             continue
         if elapsed >= person_through:
             people_through += 1
             continue
-        if elapsed < departure:
-            colour = ARRIVING
-        elif elapsed < parked_end:
+        if elapsed < parked_end:
             colour = PARKED
             parked_count += 1
         else:
@@ -386,27 +420,35 @@ def render_comparison_tab():
 
         results = []
         for name, lower, upper, open_minutes, close_minutes, wait_until_close in scenarios:
-            log, maximum = run_monte_carlo(
+            median_run, all_runs = run_monte_carlo(
                 iterations, open_minutes, close_minutes, arrival_window,
                 lower, upper, total_cars, sim_duration, wait_until_close)
-            times = [time_value for time_value, parked in log]
-            parked = [count for time_value, count in log]
-            results.append((name, times, parked, maximum))
+            if median_run is None:
+                continue
+            median_log, maximum = median_run
+            times = [time_value for time_value, parked in median_log]
+            parked = [count for time_value, count in median_log]
+            p_times, p20, p80 = monte_carlo_percentiles(all_runs)
+            results.append((name, times, parked, maximum, p_times, p20, p80))
 
-        st.subheader(f"Median Run of {iterations} Monte Carlo Iterations")
+        st.subheader(f"Median Run + 20/80 Percentile Bounds for {iterations} Monte Carlo Iterations")
         metric_1, metric_2 = st.columns(2)
         metric_1.metric(f"{results[0][0]} peak parked", f"{results[0][3]} cars")
         metric_2.metric(f"{results[1][0]} peak parked", f"{results[1][3]} cars")
         if chart_mode == "Two lines on one chart":
             figure, axis = plt.subplots(figsize=(10, 5))
-            for name, times, parked, maximum in results:
-                axis.plot(times, parked, label=name)
+            for index, (name, times, parked, maximum, p_times, p20, p80) in enumerate(results):
+                colour = f"C{index}"
+                axis.fill_between(p_times, p20, p80, color=colour, alpha=0.15)
+                axis.plot(times, parked, label=f"{name} median", color=colour, linewidth=2)
             axis.legend()
             axes = (axis,)
         else:
             figure, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
-            for axis, (name, times, parked, maximum) in zip(axes, results):
-                axis.plot(times, parked, label=name)
+            for axis, (name, times, parked, maximum, p_times, p20, p80) in zip(axes, results):
+                colour = axis._get_lines[0].get_color() if axis.has_data() else None
+                axis.fill_between(p_times, p20, p80, color=colour or "C0", alpha=0.15)
+                axis.plot(times, parked, label=f"{name} median", color=colour or "C0", linewidth=2)
                 axis.set_title(name)
                 axis.legend()
         for axis in axes:
