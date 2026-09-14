@@ -338,21 +338,21 @@ def render_comparison_tab():
     # whether cars wait until the gate closes before leaving.
     st.header("Two-Scenario Comparison")
     st.write("Compare parked-car occupancy for two scenarios using Monte Carlo median runs.")
-    iterations = st.number_input("Monte Carlo iterations", min_value=1, value=20, step=1,
+    iterations = st.number_input("Monte Carlo iterations", min_value=1, value=500, step=1,
                                  key="comparison_iterations")
     st.subheader("Shared Settings")
     shared = st.columns(4)
-    total_cars = shared[0].number_input("Total number of cars", min_value=1, value=70, step=1,
+    total_cars = shared[0].number_input("Total number of cars", min_value=1, value=55, step=1,
                                         key="comparison_total_cars")
     arrival_window = shared[1].number_input("Arrival window before gate opening (minutes)",
-                                            min_value=0, value=10, step=5,
+                                            min_value=0, value=10, step=1,
                                             key="comparison_arrival_window")
     simulation_start = shared[2].slider("Simulation start time", min_value=time(8, 0),
                                         max_value=time(9, 30), value=time(8, 30),
                                         step=timedelta(minutes=15), format="HH:mm",
                                         key="comparison_simulation_start")
     simulation_end = shared[3].slider("Simulation end time", min_value=time(8, 0),
-                                      max_value=time(9, 30), value=time(9, 0),
+                                      max_value=time(9, 30), value=time(9, 15),
                                       step=timedelta(minutes=15), format="HH:mm",
                                       key="comparison_simulation_end")
 
