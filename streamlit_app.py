@@ -27,7 +27,6 @@ PARKED = (244, 177, 68)
 LEAVING = (116, 215, 133)
 PERSON = (250, 245, 230)
 GATE = (220, 95, 95)
-PERSON_WALK_MINUTES = 2.0
 
 
 def time_to_minutes(value):
@@ -191,7 +190,7 @@ def visualizer_fonts():
 
 
 def create_cars(total_cars, gate_open, gate_close, arrival_window,
-                drop_lower, drop_upper, departure_mean, seed):
+                drop_lower, drop_upper, departure_mean, walk_time, seed):
     # Generate the data for each car in the visual simulation: when it arrives,
     # how long it stays parked, how long it takes to clear the space, and where
     # to draw it on the screen.
@@ -201,14 +200,21 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
         rng.uniform(arrival_start, gate_close)
         for _ in range(total_cars))
     cars = []
+    cars_per_row = (total_cars + 1) // 2
+    queue_width = ROAD_RECT[2] - ROAD_RECT[0] - 70
+    queue_spacing = queue_width / max(1, cars_per_row - 1)
+    queue_y = (ROAD_RECT[1] + ROAD_RECT[3]) // 2
     for index, arrival in enumerate(arrivals):
+        row = index // cars_per_row
+        column = index % cars_per_row
         cars.append({
             "arrival": arrival,
             "duration": rng.uniform(drop_lower, drop_upper),
             "departure_time": max(1.0, float(np.random.poisson(departure_mean))),
-            "walk_time": PERSON_WALK_MINUTES,
-            "x": ROAD_RECT[0] + 35 + (index % 12) * 58,
-            "y": ROAD_RECT[1] + 45 + (index // 12) * 42,
+            "walk_time": walk_time,
+            "x": ROAD_RECT[0] + 35 + column * queue_spacing,
+            "y": queue_y - 32 + row * 64,
+            "half_width": max(8, min(21, queue_spacing * 0.42)),
         })
     return cars
 
@@ -233,9 +239,10 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
     surface = Image.new("RGB", WINDOW_SIZE, BACKGROUND)
     draw = ImageDraw.Draw(surface)
     draw.rounded_rectangle(ROAD_RECT, radius=8, fill=ROAD, outline=ROAD_EDGE, width=3)
-    gate_x = ROAD_RECT[2] - 28
-    draw.line((gate_x, ROAD_RECT[1], gate_x, ROAD_RECT[3]), fill=GATE, width=8)
-    draw.text((gate_x - 28, ROAD_RECT[1] - 26), "GATE", font=fonts[1], fill=GATE)
+    gate_x = (ROAD_RECT[0] + ROAD_RECT[2]) // 2
+    gate_y = ROAD_RECT[1] + 18
+    draw.line((gate_x - 26, gate_y, gate_x + 26, gate_y), fill=GATE, width=5)
+    draw.text((gate_x - 20, ROAD_RECT[1] - 26), "GATE", font=fonts[1], fill=GATE)
 
     parked_count = 0
     people_through = 0
@@ -253,15 +260,16 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
         else:
             colour = LEAVING
         car_rect = (
-            int(car_data["x"] - 21), int(car_data["y"] - 11),
-            int(car_data["x"] + 21), int(car_data["y"] + 11))
+            int(car_data["x"] - car_data["half_width"]), int(car_data["y"] - 11),
+            int(car_data["x"] + car_data["half_width"]), int(car_data["y"] + 11))
         draw.rounded_rectangle(car_rect, radius=5, fill=colour, outline=TEXT, width=2)
         if departure_end <= elapsed < person_through:
             progress = (elapsed - departure_end) / car_data["walk_time"]
             person_x = car_data["x"] + (gate_x - car_data["x"]) * progress
+            person_y = car_data["y"] + (gate_y - car_data["y"]) * progress
             draw.ellipse(
-                (int(person_x - 6), int(car_data["y"] - 6),
-                 int(person_x + 6), int(car_data["y"] + 6)), fill=PERSON)
+                (int(person_x - 6), int(person_y - 6),
+                 int(person_x + 6), int(person_y + 6)), fill=PERSON)
 
     draw.text((40, 25), "School Drop-Off Parking", font=fonts[0], fill=TEXT)
     draw.text(
@@ -326,6 +334,10 @@ def render_visualizer_tab():
     gate_close = time_to_minutes(scenario["close"]) - time_to_minutes(simulation_start)
     wait_until_close = scenario["wait_until_close"]
     seed = st.number_input("Random seed", min_value=0, value=42, step=1)
+    walk_time = st.number_input(
+        "Time for people to get through the gate (minutes)",
+        min_value=0.5, max_value=15.0, value=2.0, step=0.5,
+        key="visualizer_walk_time")
 
     st.caption(
         f"{selected_name}: parking {drop_lower:g}-{drop_upper:g} minutes, "
@@ -336,7 +348,7 @@ def render_visualizer_tab():
     if st.button("Run visualization", type="primary"):
         cars = create_cars(
             total_cars, gate_open, gate_close, arrival_window,
-            drop_lower, drop_upper, departure_mean, seed)
+            drop_lower, drop_upper, departure_mean, walk_time, seed)
         fonts = visualizer_fonts()
         frame_slot, chart_slot = st.columns(2)
         frame_output = frame_slot.empty()
@@ -344,7 +356,7 @@ def render_visualizer_tab():
         history = []
         max_time = max(
             gate_close,
-            max(car_times(car_data, gate_open, gate_close, wait_until_close)[2]
+            max(car_times(car_data, gate_open, gate_close, wait_until_close)[3]
                 for car_data in cars))
         elapsed = 0.0
         while elapsed <= max_time:
