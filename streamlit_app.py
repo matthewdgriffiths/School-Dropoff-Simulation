@@ -22,19 +22,22 @@ def format_clock_time(start_time, elapsed_minutes):
 	return f"{hour:02d}:{minute:02d}"
 
 
-def arrival_time(open_time, sim_duration):
-	return random.triangular(0, sim_duration, open_time)
+def arrival_time(open_time, close_time, minutes_before_open):
+	return random.uniform(
+		open_time - minutes_before_open,
+		close_time)
 
 
 def dropoff_time(lower, upper):
 	return random.uniform(lower, upper)
 
 
-def car(env, name, gate_open, gate_close, dropoff_lane, drop_lower,
-			drop_upper, wait_until_close):
-	wait_until = gate_close if wait_until_close else gate_open
-	if env.now < wait_until:
-		yield env.timeout(wait_until - env.now)
+def car(env, name, gate_open, dropoff_lane, drop_lower, drop_upper,
+		wait_until_open, held_queue):
+	if wait_until_open and env.now < gate_open:
+		yield env.timeout(gate_open - env.now)
+	if wait_until_open:
+		held_queue["count"] -= 1
 
 	with dropoff_lane.request() as req:
 		yield req
@@ -42,74 +45,73 @@ def car(env, name, gate_open, gate_close, dropoff_lane, drop_lower,
 		yield env.timeout(duration)
 
 
-def arrival_process(env, rate_per_min, open_time, close_time,
-					dropoff_lane,
-					drop_lower, drop_upper, sim_duration, total_cars,
-					wait_until_close):
-	car_id = 0
-	while car_id < total_cars:
-		interarrival = np.random.exponential(1 / rate_per_min)
-		yield env.timeout(interarrival)
-
-		car_id += 1
-		target_arrival = arrival_time(open_time, sim_duration)
-		yield env.timeout(max(0, target_arrival - env.now))
+def arrival_process(env, open_time, close_time, minutes_before_open,
+					dropoff_lane, drop_lower, drop_upper, total_cars,
+					wait_until_open, held_queue):
+	arrival_times = sorted(
+		arrival_time(open_time, close_time, minutes_before_open)
+		for _ in range(total_cars))
+	for car_id, target_arrival in enumerate(arrival_times, start=1):
+		yield env.timeout(target_arrival - env.now)
+		if wait_until_open:
+			held_queue["count"] += 1
 
 		env.process(car(env,
 						f"Car{car_id}",
 						open_time,
-						close_time,
 						dropoff_lane,
 						drop_lower,
 						drop_upper,
-						wait_until_close))
+						wait_until_open,
+						held_queue))
 
 
-def queue_monitor(env, dropoff_lane, queue_log, interval=0.2):
+def queue_monitor(env, dropoff_lane, held_queue, queue_log, interval=0.2):
 	while True:
-		queue_log.append((env.now, len(dropoff_lane.queue)))
+		queue_log.append((env.now, held_queue["count"] + len(dropoff_lane.queue)))
 		yield env.timeout(interval)
 
 
-def run_sim(rate_per_min,
-			open_time,
+def run_sim(open_time,
 			close_time,
+			minutes_before_open,
 			drop_lower,
 			drop_upper,
 			sim_duration,
-		total_cars,
-		wait_until_close):
+			total_cars,
+			wait_until_open):
 
 	env = simpy.Environment()
 	dropoff_lane = simpy.Resource(env, capacity=1)
+	held_queue = {"count": 0}
 	queue_log = []
 
 	env.process(arrival_process(env,
-								rate_per_min,
 								open_time,
 								close_time,
+								minutes_before_open,
 								dropoff_lane,
 								drop_lower,
 								drop_upper,
-								sim_duration,
 								total_cars,
-								wait_until_close))
+								wait_until_open,
+								held_queue))
 
-	env.process(queue_monitor(env, dropoff_lane, queue_log))
+	env.process(queue_monitor(env, dropoff_lane, held_queue, queue_log))
 
 	env.run(until=sim_duration)
 
 	return queue_log
 
 
-def run_monte_carlo(iterations, rate_per_min, open_time, close_time,
-					drop_lower, drop_upper,
-					sim_duration, total_cars, wait_until_close):
+def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
+					drop_lower, drop_upper, total_cars, sim_duration,
+					wait_until_open):
 	runs = []
 	for _ in range(iterations):
-		queue_log = run_sim(rate_per_min, open_time, close_time,
-						drop_lower, drop_upper,
-						sim_duration, total_cars, wait_until_close)
+		queue_log = run_sim(open_time, close_time, minutes_before_open,
+						drop_lower, drop_upper, sim_duration, total_cars,
+						wait_until_open)
 		maximum_queue = max(queue for time, queue in queue_log)
 		runs.append((queue_log, maximum_queue))
 
@@ -121,7 +123,7 @@ def run_monte_carlo(iterations, rate_per_min, open_time, close_time,
 # -----------------------------
 
 st.title("School Drop-Off Simulation (SimPy)")
-st.write("Play with arrival rates, drop-off durations, and gate timings to see queue behaviour.")
+st.write("Configure arrival windows, drop-off durations, and gate timings to see queue behaviour.")
 
 st.header("Simulation Controls")
 
@@ -133,11 +135,15 @@ iterations = st.number_input(
 	help="Number of independent simulation runs for each scenario.")
 
 st.subheader("Shared Settings")
-shared_col_1, shared_col_2, shared_col_3 = st.columns(3)
+shared_col_1, shared_col_2, shared_col_3, shared_col_4 = st.columns(4)
 with shared_col_1:
 	total_cars = st.number_input("Total number of cars", min_value=1, value=70, step=1)
 with shared_col_2:
-	rate = st.slider("Cars per minute", 1, 20, 6)
+	arrival_window = st.number_input(
+		"Arrival window before gate opening (minutes)",
+		min_value=0,
+		value=10,
+		step=5)
 with shared_col_3:
 	simulation_start = st.slider(
 		"Simulation start time",
@@ -146,6 +152,7 @@ with shared_col_3:
 		value=time(8, 30),
 		step=timedelta(minutes=15),
 		format="HH:mm")
+with shared_col_4:
 	simulation_end = st.slider(
 		"Simulation end time",
 		min_value=time(8, 0),
@@ -159,14 +166,14 @@ scenario_1_col, scenario_2_col = st.columns(2)
 
 with scenario_1_col:
 	st.markdown("**Scenario 1**")
-	scenario_1_name = st.text_input("Scenario 1 name", value="Scenario 1")
+	scenario_1_name = st.text_input("Scenario 1 name", value="old")
 	scenario_1_drop_lower = st.slider("Drop-off duration LOWER bound (minutes)", 0.5, 5.0, 1.0, key="scenario_1_drop_lower")
 	scenario_1_drop_upper = st.slider("Drop-off duration UPPER bound (minutes)", 1.0, 10.0, 3.0, key="scenario_1_drop_upper")
 	scenario_1_open_time = st.slider(
 		"Gate opens at",
 		min_value=time(8, 0),
 		max_value=time(9, 0),
-		value=time(8, 15),
+		value=time(8, 45),
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_1_open_time")
@@ -174,25 +181,25 @@ with scenario_1_col:
 		"Gate closes at",
 		min_value=time(8, 0),
 		max_value=time(9, 0),
-		value=time(8, 30),
+		value=time(8, 50),
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_1_close_time")
-	scenario_1_wait_until_close = st.checkbox(
-		"Parents wait at the gate until closing time",
+	scenario_1_wait_until_open = st.checkbox(
+		"Limit car departure until gate opening",
 		value=False,
-		key="scenario_1_wait_until_close")
+		key="scenario_1_wait_until_open")
 
 with scenario_2_col:
 	st.markdown("**Scenario 2**")
-	scenario_2_name = st.text_input("Scenario 2 name", value="Scenario 2")
+	scenario_2_name = st.text_input("Scenario 2 name", value="new")
 	scenario_2_drop_lower = st.slider("Drop-off duration LOWER bound (minutes)", 0.5, 5.0, 1.0, key="scenario_2_drop_lower")
 	scenario_2_drop_upper = st.slider("Drop-off duration UPPER bound (minutes)", 1.0, 10.0, 3.0, key="scenario_2_drop_upper")
 	scenario_2_open_time = st.slider(
 		"Gate opens at",
 		min_value=time(8, 0),
 		max_value=time(9, 0),
-		value=time(8, 15),
+		value=time(8, 45),
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_2_open_time")
@@ -200,14 +207,14 @@ with scenario_2_col:
 		"Gate closes at",
 		min_value=time(8, 0),
 		max_value=time(9, 0),
-		value=time(8, 30),
+		value=time(8, 50),
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_2_close_time")
-	scenario_2_wait_until_close = st.checkbox(
-		"Parents wait at the gate until closing time",
+	scenario_2_wait_until_open = st.checkbox(
+		"Limit car departure until gate opening",
 		value=False,
-		key="scenario_2_wait_until_close")
+		key="scenario_2_wait_until_open")
 
 chart_mode = st.radio(
 	"Chart layout",
@@ -222,6 +229,7 @@ if st.button("Run Simulation"):
 	scenario_1_close_minutes = time_to_minutes(scenario_1_close_time) - start_minutes
 	scenario_2_open_minutes = time_to_minutes(scenario_2_open_time) - start_minutes
 	scenario_2_close_minutes = time_to_minutes(scenario_2_close_time) - start_minutes
+	arrival_window = int(arrival_window)
 
 	validation_errors = []
 	if sim_duration <= 0:
@@ -232,21 +240,22 @@ if st.button("Run Simulation"):
 		if not 0 <= open_minutes < close_minutes <= sim_duration:
 			validation_errors.append(
 				f"{name} gate times must fall within the simulation window and open before closing.")
+	if arrival_window > min(scenario_1_open_minutes, scenario_2_open_minutes):
+		validation_errors.append(
+			"The shared arrival window cannot begin before the simulation start time.")
 
 	if validation_errors:
 		for error in validation_errors:
 			st.error(error)
 	else:
 		log_1, max_queue_1 = run_monte_carlo(
-			iterations, rate, scenario_1_open_minutes,
-			scenario_1_close_minutes, scenario_1_drop_lower,
-			scenario_1_drop_upper, sim_duration, total_cars,
-			scenario_1_wait_until_close)
+			iterations, scenario_1_open_minutes, scenario_1_close_minutes,
+			arrival_window, scenario_1_drop_lower, scenario_1_drop_upper,
+			total_cars, sim_duration, scenario_1_wait_until_open)
 		log_2, max_queue_2 = run_monte_carlo(
-			iterations, rate, scenario_2_open_minutes,
-			scenario_2_close_minutes, scenario_2_drop_lower,
-			scenario_2_drop_upper, sim_duration, total_cars,
-			scenario_2_wait_until_close)
+			iterations, scenario_2_open_minutes, scenario_2_close_minutes,
+			arrival_window, scenario_2_drop_lower, scenario_2_drop_upper,
+			total_cars, sim_duration, scenario_2_wait_until_open)
 
 		results = []
 		for name, log, max_queue in (
