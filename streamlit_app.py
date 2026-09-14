@@ -32,12 +32,12 @@ def dropoff_time(lower, upper):
 	return random.uniform(lower, upper)
 
 
-def car(env, name, gate_open, dropoff_lane, drop_lower, drop_upper,
-		wait_until_open, held_queue):
-	if wait_until_open and env.now < gate_open:
-		yield env.timeout(gate_open - env.now)
-	if wait_until_open:
-		held_queue["count"] -= 1
+def car(env, name, gate_open, gate_close, dropoff_lane, drop_lower,
+		drop_upper, wait_until_close, held_queue):
+	departure_time = gate_close if wait_until_close else gate_open
+	if env.now < departure_time:
+		yield env.timeout(departure_time - env.now)
+	held_queue["count"] -= 1
 
 	with dropoff_lane.request() as req:
 		yield req
@@ -47,22 +47,22 @@ def car(env, name, gate_open, dropoff_lane, drop_lower, drop_upper,
 
 def arrival_process(env, open_time, close_time, minutes_before_open,
 					dropoff_lane, drop_lower, drop_upper, total_cars,
-					wait_until_open, held_queue):
+					wait_until_close, held_queue):
 	arrival_times = sorted(
 		arrival_time(open_time, close_time, minutes_before_open)
 		for _ in range(total_cars))
 	for car_id, target_arrival in enumerate(arrival_times, start=1):
 		yield env.timeout(target_arrival - env.now)
-		if wait_until_open:
-			held_queue["count"] += 1
+		held_queue["count"] += 1
 
 		env.process(car(env,
 						f"Car{car_id}",
 						open_time,
+						close_time,
 						dropoff_lane,
 						drop_lower,
 						drop_upper,
-						wait_until_open,
+						wait_until_close,
 						held_queue))
 
 
@@ -79,7 +79,7 @@ def run_sim(open_time,
 			drop_upper,
 			sim_duration,
 			total_cars,
-			wait_until_open):
+		wait_until_close):
 
 	env = simpy.Environment()
 	dropoff_lane = simpy.Resource(env, capacity=1)
@@ -94,7 +94,7 @@ def run_sim(open_time,
 								drop_lower,
 								drop_upper,
 								total_cars,
-								wait_until_open,
+								wait_until_close,
 								held_queue))
 
 	env.process(queue_monitor(env, dropoff_lane, held_queue, queue_log))
@@ -106,12 +106,12 @@ def run_sim(open_time,
 
 def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
 					drop_lower, drop_upper, total_cars, sim_duration,
-					wait_until_open):
+					wait_until_close):
 	runs = []
 	for _ in range(iterations):
 		queue_log = run_sim(open_time, close_time, minutes_before_open,
 						drop_lower, drop_upper, sim_duration, total_cars,
-						wait_until_open)
+						wait_until_close)
 		maximum_queue = max(queue for time, queue in queue_log)
 		runs.append((queue_log, maximum_queue))
 
@@ -185,10 +185,10 @@ with scenario_1_col:
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_1_close_time")
-	scenario_1_wait_until_open = st.checkbox(
-		"Limit car departure until gate opening",
+	scenario_1_wait_until_close = st.checkbox(
+		"Limit car departure until gate closing",
 		value=False,
-		key="scenario_1_wait_until_open")
+		key="scenario_1_wait_until_close")
 
 with scenario_2_col:
 	st.markdown("**Scenario 2**")
@@ -211,10 +211,10 @@ with scenario_2_col:
 		step=timedelta(minutes=5),
 		format="HH:mm",
 		key="scenario_2_close_time")
-	scenario_2_wait_until_open = st.checkbox(
-		"Limit car departure until gate opening",
+	scenario_2_wait_until_close = st.checkbox(
+		"Limit car departure until gate closing",
 		value=False,
-		key="scenario_2_wait_until_open")
+		key="scenario_2_wait_until_close")
 
 chart_mode = st.radio(
 	"Chart layout",
@@ -251,11 +251,11 @@ if st.button("Run Simulation"):
 		log_1, max_queue_1 = run_monte_carlo(
 			iterations, scenario_1_open_minutes, scenario_1_close_minutes,
 			arrival_window, scenario_1_drop_lower, scenario_1_drop_upper,
-			total_cars, sim_duration, scenario_1_wait_until_open)
+			total_cars, sim_duration, scenario_1_wait_until_close)
 		log_2, max_queue_2 = run_monte_carlo(
 			iterations, scenario_2_open_minutes, scenario_2_close_minutes,
 			arrival_window, scenario_2_drop_lower, scenario_2_drop_upper,
-			total_cars, sim_duration, scenario_2_wait_until_open)
+			total_cars, sim_duration, scenario_2_wait_until_close)
 
 		results = []
 		for name, log, max_queue in (
