@@ -32,43 +32,40 @@ def dropoff_time(lower, upper):
 	return random.uniform(lower, upper)
 
 
-def car(env, name, gate_open, gate_close, dropoff_lane, drop_lower,
-		drop_upper, wait_until_close, held_queue):
+def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
+		wait_until_close, parked_cars):
 	departure_time = gate_close if wait_until_close else gate_open
 	if env.now < departure_time:
 		yield env.timeout(departure_time - env.now)
-	held_queue["count"] -= 1
 
-	with dropoff_lane.request() as req:
-		yield req
-		duration = dropoff_time(drop_lower, drop_upper)
-		yield env.timeout(duration)
+	parked_cars["count"] += 1
+	duration = dropoff_time(drop_lower, drop_upper)
+	yield env.timeout(duration)
+	parked_cars["count"] -= 1
 
 
 def arrival_process(env, open_time, close_time, minutes_before_open,
-					dropoff_lane, drop_lower, drop_upper, total_cars,
-					wait_until_close, held_queue):
+					drop_lower, drop_upper, total_cars,
+					wait_until_close, parked_cars):
 	arrival_times = sorted(
 		arrival_time(open_time, close_time, minutes_before_open)
 		for _ in range(total_cars))
 	for car_id, target_arrival in enumerate(arrival_times, start=1):
 		yield env.timeout(target_arrival - env.now)
-		held_queue["count"] += 1
 
 		env.process(car(env,
 						f"Car{car_id}",
 						open_time,
 						close_time,
-						dropoff_lane,
 						drop_lower,
 						drop_upper,
 						wait_until_close,
-						held_queue))
+						parked_cars))
 
 
-def queue_monitor(env, dropoff_lane, held_queue, queue_log, interval=0.2):
+def parked_cars_monitor(env, parked_cars, parked_log, interval=0.2):
 	while True:
-		queue_log.append((env.now, held_queue["count"] + len(dropoff_lane.queue)))
+		parked_log.append((env.now, parked_cars["count"]))
 		yield env.timeout(interval)
 
 
@@ -82,26 +79,24 @@ def run_sim(open_time,
 		wait_until_close):
 
 	env = simpy.Environment()
-	dropoff_lane = simpy.Resource(env, capacity=1)
-	held_queue = {"count": 0}
-	queue_log = []
+	parked_cars = {"count": 0}
+	parked_log = []
 
 	env.process(arrival_process(env,
 								open_time,
 								close_time,
 								minutes_before_open,
-								dropoff_lane,
 								drop_lower,
 								drop_upper,
 								total_cars,
 								wait_until_close,
-								held_queue))
+								parked_cars))
 
-	env.process(queue_monitor(env, dropoff_lane, held_queue, queue_log))
+	env.process(parked_cars_monitor(env, parked_cars, parked_log))
 
 	env.run(until=sim_duration)
 
-	return queue_log
+	return parked_log
 
 
 def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
@@ -109,13 +104,13 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
 					wait_until_close):
 	runs = []
 	for _ in range(iterations):
-		queue_log = run_sim(open_time, close_time, minutes_before_open,
+		parked_log = run_sim(open_time, close_time, minutes_before_open,
 						drop_lower, drop_upper, sim_duration, total_cars,
 						wait_until_close)
-		maximum_queue = max(queue for time, queue in queue_log)
-		runs.append((queue_log, maximum_queue))
+		maximum_parked = max(parked for time, parked in parked_log)
+		runs.append((parked_log, maximum_parked))
 
-	median_maximum = np.median([maximum_queue for queue_log, maximum_queue in runs])
+	median_maximum = np.median([maximum_parked for parked_log, maximum_parked in runs])
 	return min(runs, key=lambda run: abs(run[1] - median_maximum))
 
 # -----------------------------
@@ -123,7 +118,7 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
 # -----------------------------
 
 st.title("School Drop-Off Simulation (SimPy)")
-st.write("Configure arrival windows, drop-off durations, and gate timings to see queue behaviour.")
+st.write("Configure arrival windows, parking durations, and gate timings to see parked-car occupancy.")
 
 st.header("Simulation Controls")
 
@@ -248,39 +243,39 @@ if st.button("Run Simulation"):
 		for error in validation_errors:
 			st.error(error)
 	else:
-		log_1, max_queue_1 = run_monte_carlo(
+		log_1, max_parked_1 = run_monte_carlo(
 			iterations, scenario_1_open_minutes, scenario_1_close_minutes,
 			arrival_window, scenario_1_drop_lower, scenario_1_drop_upper,
 			total_cars, sim_duration, scenario_1_wait_until_close)
-		log_2, max_queue_2 = run_monte_carlo(
+		log_2, max_parked_2 = run_monte_carlo(
 			iterations, scenario_2_open_minutes, scenario_2_close_minutes,
 			arrival_window, scenario_2_drop_lower, scenario_2_drop_upper,
 			total_cars, sim_duration, scenario_2_wait_until_close)
 
 		results = []
-		for name, log, max_queue in (
-			(scenario_1_name, log_1, max_queue_1),
-			(scenario_2_name, log_2, max_queue_2)):
-			times = [time for time, queue in log]
-			queues = [queue for time, queue in log]
-			results.append((name, times, queues, max_queue))
+		for name, log, max_parked in (
+			(scenario_1_name, log_1, max_parked_1),
+			(scenario_2_name, log_2, max_parked_2)):
+			times = [time for time, parked in log]
+			parked = [count for time, count in log]
+			results.append((name, times, parked, max_parked))
 
 		st.subheader(f"Median Run of {iterations} Monte Carlo Iterations")
 		metric_col_1, metric_col_2 = st.columns(2)
-		metric_col_1.metric(results[0][0], f"{results[0][3]} cars")
-		metric_col_2.metric(results[1][0], f"{results[1][3]} cars")
+		metric_col_1.metric(f"{results[0][0]} peak parked", f"{results[0][3]} cars")
+		metric_col_2.metric(f"{results[1][0]} peak parked", f"{results[1][3]} cars")
 
 		if chart_mode == "Two lines on one chart":
 			fig, ax = plt.subplots(figsize=(10, 5))
-			for name, times, queues, max_queue in results:
-				ax.plot(times, queues, label=name)
-			ax.set_title("Queue Length Over Time")
+			for name, times, parked, max_parked in results:
+				ax.plot(times, parked, label=name)
+			ax.set_title("Parked Cars Over Time")
 			ax.legend()
 			axes = (ax,)
 		else:
 			fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
-			for ax, (name, times, queues, max_queue) in zip(axes, results):
-				ax.plot(times, queues, label=name)
+			for ax, (name, times, parked, max_parked) in zip(axes, results):
+				ax.plot(times, parked, label=name)
 				ax.set_title(name)
 				ax.legend()
 
@@ -289,6 +284,6 @@ if st.button("Run Simulation"):
 				FuncFormatter(
 					lambda value, position: format_clock_time(simulation_start, value)))
 			ax.set_xlabel("Time of day")
-			ax.set_ylabel("Queue length (cars)")
+			ax.set_ylabel("Parked cars")
 			ax.grid(True)
 		st.pyplot(fig)
