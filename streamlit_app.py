@@ -369,6 +369,79 @@ def make_visualizer_chart(history, simulation_start):
     return figure
 
 
+def render_guide_tab():
+    st.header("How to use this model")
+    st.write(
+        "This app runs a randomised simulation of a school drop-off system. "
+        "Use the controls to change the model parameters, run the simulation, "
+        "and compare how many cars are parked over time.")
+
+    st.markdown(
+        "[Go to Two-Scenario Comparison](#two-scenario-comparison)  |  "
+        "[Go to Parking Visualizer](#parking-visualizer)")
+
+    st.subheader("What the app does")
+    st.write(
+        "Cars arrive at random times between the start of the arrival window "
+        "and gate closing. Each car receives a random parking duration between "
+        "the configured lower and upper bounds, then a random departure delay. "
+        "The model records how many cars are parked at regular time intervals.")
+    st.write(
+        "The parameters can be adjusted in the simulation configuration in the "
+        "Two-Scenario Comparison tab. Shared settings apply to both scenarios; "
+        "scenario settings control each alternative separately.")
+
+    st.subheader("Run the model before reading the graph")
+    st.write(
+        "Changing inputs does not generate a new result automatically. Press "
+        "Run comparison in the Two-Scenario Comparison tab to execute the "
+        "Monte Carlo simulation and generate the comparison graph. More "
+        "iterations usually make the result more stable, but take longer to run.")
+
+    st.subheader("Model logic")
+    st.code(
+        "Set simulation configuration\n"
+        "        |\n"
+        "        v\n"
+        "Generate random arrival times for every car\n"
+        "        |\n"
+        "        v\n"
+        "Car arrives -> parking count increases\n"
+        "        |\n"
+        "        v\n"
+        "Random parking duration ends\n"
+        "        |\n"
+        "        +--> departure allowed -> random departure delay -> count decreases\n"
+        "        |\n"
+        "        +--> departure limited -> wait until gate closes -> delay -> count decreases\n"
+        "        |\n"
+        "        v\n"
+        "Repeat for many runs -> median run and 20th/80th percentile band",
+        language="text")
+
+    st.subheader("How to read the comparison chart")
+    st.write(
+        "The solid line is the representative run: the Monte Carlo run whose "
+        "peak parked-car count is closest to the median peak across all runs. "
+        "The shaded band is calculated independently at each time point from "
+        "the 20th to the 80th percentile of parked-car counts across all runs.")
+    st.write(
+        "The lower bound therefore shows a relatively low-occupancy outcome at "
+        "that time, while the upper bound shows a relatively high-occupancy "
+        "outcome. The band is not a guaranteed minimum and maximum, and it is "
+        "not a confidence interval. A wider band means that random variation "
+        "makes the result less predictable. A higher line or band means more "
+        "cars are parked and potentially more congestion.")
+
+    st.subheader("Visualisation")
+    st.write(
+        "After running the comparison, open the Parking Visualizer tab and "
+        "choose a saved scenario. Press Run visualization to animate cars, "
+        "people in the playground, and people entering school. The visualizer "
+        "uses the selected scenario and a random seed to create one illustrative "
+        "run; its chart is separate from the Monte Carlo comparison chart.")
+
+
 def render_visualizer_tab():
     # This tab shows a cartoon-style view of what the simulation is doing.
     # It uses the same scenario data that was built in the comparison tab.
@@ -474,7 +547,7 @@ def render_comparison_tab():
     values = []
     for index, column in enumerate((scenario_1_col, scenario_2_col), start=1):
         with column:
-            default_name = "drop and wait" if index == 1 else "drop and run"
+            default_name = "drop and wait" if index == 1 else "drop and leave"
             default_lower = 3 if index == 1 else 3
             default_upper = 7 if index == 1 else 7
             default_open = time(8, 40) if index == 1 else time(8, 40)
@@ -588,7 +661,10 @@ st.info(
     "after their parking and departure delays; when **Limit car departure until "
     "gate closing** is enabled, cars wait until closing before departing."
 )
-comparison_tab, visualizer_tab = st.tabs(["Two-scenario comparison", "Visualisation"])
+guide_tab, comparison_tab, visualizer_tab = st.tabs(
+    ["Guide", "Two-scenario comparison", "Visualisation"])
+with guide_tab:
+    render_guide_tab()
 with comparison_tab:
     render_comparison_tab()
 with visualizer_tab:

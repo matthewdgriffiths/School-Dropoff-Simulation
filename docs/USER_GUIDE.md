@@ -40,7 +40,14 @@ http://localhost:8501
 
 ## Interface overview
 
-The app has two tabs:
+The app opens on the **Guide** tab. It explains the model, its logic, the chart
+bounds, and how to run the simulation. Use these links to jump to the working
+parts of the app:
+
+- [Two-scenario comparison](#a-two-scenario-comparison)
+- [Visualisation](#b-visualisation)
+
+The app then has two working tabs:
 
 ### A. Two-scenario comparison
 
@@ -70,6 +77,10 @@ For each scenario, you can adjust:
 
 This value tells the app how many random simulation runs to test. More runs usually give a more stable estimate, but the app will take longer to compute.
 
+Press **Run comparison** after changing the configuration. The graph is only
+generated when the model is run; changing an input alone does not update an
+existing graph.
+
 ### B. Visualisation
 
 This tab shows an animation of the drop-off area. Cars are shown in two rows at
@@ -96,13 +107,22 @@ interval after release.
 
 ## How to read the comparison chart
 
-The chart shows parked-car counts over time.
+The chart shows parked-car counts over time. The solid line is the representative
+run: the run whose peak parked-car count is closest to the median peak across all
+Monte Carlo runs.
 
 - The x-axis is time-of-day.
 - The y-axis is parked cars.
 - Each line represents one scenario.
 
-A higher and wider line means that more cars are likely to be waiting/parked at the same time. This often indicates more congestion.
+The shaded area runs from the 20th percentile (lower bound) to the 80th
+percentile (upper bound) of parked-car counts across all runs at each time. The
+lower bound is a relatively low-occupancy outcome and the upper bound is a
+relatively high-occupancy outcome. They are not guaranteed minimum and maximum
+values, and they are not a confidence interval. A wider band means that random
+variation makes the result less predictable. A higher line or wider area means
+more cars are likely to be parked at the same time, which often indicates more
+congestion.
 
 The app also displays peak parked-car values for each scenario.
 
