@@ -645,7 +645,7 @@ def render_comparison_tab():
 
 
 st.set_page_config(page_title="School Drop-Off Models", layout="wide")
-st.title("School Drop-Off Models")
+st.title("School Drop-Off Scenario Comparison and Visualizer")
 st.info(
     "**Model summary:** Cars arrive at random times from a configurable number of minutes (default 10) before the gate opening time. "
     "Each car stays for a randomly-sampled parking duration (upper and lower bounds are specified). " \
