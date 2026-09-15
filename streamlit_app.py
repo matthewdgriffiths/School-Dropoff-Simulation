@@ -651,15 +651,12 @@ def render_comparison_tab():
 st.set_page_config(page_title="School Drop-Off Models", layout="wide")
 st.title("School Drop-Off Models")
 st.info(
-    "**Model summary:** Cars arrive at random times from the gate opening time "
-    "minus the arrival window through gate closing. Each car stays for a randomly "
-    "sampled parking duration, then its departure delay is sampled from a Poisson "
-    "distribution using the shared departure mean. The comparison tab repeats "
-    "this process with Monte Carlo simulations and shows a representative central "
-    "occupancy run with 20th- and 80th-percentile bounds. People enter the "
-    "playground after opening and school at closing. Normally, cars can depart "
-    "after their parking and departure delays; when **Limit car departure until "
-    "gate closing** is enabled, cars wait until closing before departing."
+    "**Model summary:** Cars arrive at random times from a configurable number of minutes (default 10) before the gate opening time. "
+    "Each car stays for a randomly-sampled parking duration (upper and lower bounds are specified). " \
+    "Each car then has a departure delay applied from a Poisson distribution (default mean is 3 minutes) to simulate speed of departure." \
+    "Children can only enter the playground after gate opening and enter school at gate closing. Normally, cars can depart "
+    "after their parking and departure delays. However, when **Limit car departure until "
+    "gate closing** is enabled, cars wait until the gate closes before their departure is simulated."
 )
 guide_tab, comparison_tab, visualizer_tab = st.tabs(
     ["Guide", "Two-scenario comparison", "Visualisation"])
