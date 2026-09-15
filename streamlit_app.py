@@ -449,7 +449,7 @@ def render_visualizer_tab():
     # This tab shows a cartoon-style view of what the simulation is doing.
     # It uses the same scenario data that was built in the comparison tab.
     st.header("Parking Visualizer")
-    st.write("Watch cars park, people leave their cars, and pass through the gate.")
+    st.write("Watch cars park, children leave their cars, go through the gate and enter school at gate closing time.")
     scenarios = st.session_state.get("comparison_scenarios", {})
     if not scenarios:
         st.info("Configure scenarios in the comparison tab first.")
@@ -662,7 +662,7 @@ st.title("School Drop-Off Scenario Comparison and Visualizer")
 st.info(
     "**Model summary:** Cars arrive at random times from a configurable number of minutes (default 10) before the gate opening time. "
     "Each car stays for a randomly-sampled parking duration (upper and lower bounds are specified). " \
-    "Each car then has a departure delay applied from a Poisson distribution (default mean is 3 minutes) to simulate speed of departure." \
+    "Each car then has a departure delay applied from a Poisson distribution (default mean is 3 minutes) to simulate speed of departure. " \
     "Children can only enter the playground after gate opening and enter school at gate closing. Normally, cars can depart "
     "after their parking and departure delays. However, when **Limit car departure until "
     "gate closing** is enabled, cars wait until the gate closes before their departure is simulated."
