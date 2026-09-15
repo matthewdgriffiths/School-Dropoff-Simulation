@@ -70,7 +70,7 @@ def departure_time(mean_minutes):
 
 
 def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
-    departure_mean, wait_until_close, parked_cars):
+    departure_mean, wait_until_close, parked_cars, turnaround_times):
     # A car is introduced at its actual arrival time. It then occupies a parking
     # space immediately. If the departure is limited until gate closing, the car
     # stays parked until the gate closes even if its parking duration would have
@@ -81,9 +81,11 @@ def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
     departure_duration = departure_time(departure_mean)
     # Nobody can leave before the gate opens. When departure is limited, cars
     # must remain until the gate closes instead.
+    arrival = env.now
     departure_start = max(env.now + parking_duration, gate_open)
     if wait_until_close:
         departure_start = max(departure_start, gate_close)
+    turnaround_times.append(departure_start + departure_duration - arrival)
     yield env.timeout(max(0, departure_start - env.now))
     yield env.timeout(departure_duration)
     parked_cars["count"] -= 1
@@ -91,7 +93,7 @@ def car(env, name, gate_open, gate_close, drop_lower, drop_upper,
 
 def arrival_process(env, open_time, close_time, minutes_before_open,
                     drop_lower, drop_upper, departure_mean, total_cars,
-                    wait_until_close, parked_cars):
+                    wait_until_close, parked_cars, turnaround_times):
     # Create the schedule of when each car should arrive. The arrivals are sorted
     # so the queue looks realistic. The arrival window is explicitly:
     #   [gate_open - arrival_window, gate_close]
@@ -105,7 +107,7 @@ def arrival_process(env, open_time, close_time, minutes_before_open,
         env.process(car(
             env, f"Car{car_id}", open_time, close_time,
             drop_lower, drop_upper, departure_mean, wait_until_close,
-            parked_cars))
+            parked_cars, turnaround_times))
 
 
 def parked_cars_monitor(env, parked_cars, parked_log, interval=0.2):
@@ -124,13 +126,15 @@ def run_sim(open_time, close_time, minutes_before_open, drop_lower,
     env = simpy.Environment()
     parked_cars = {"count": 0}
     parked_log = []
+    turnaround_times = []
     env.process(arrival_process(
         env, open_time, close_time, minutes_before_open,
         drop_lower, drop_upper, departure_mean, total_cars,
-        wait_until_close, parked_cars))
+        wait_until_close, parked_cars, turnaround_times))
     env.process(parked_cars_monitor(env, parked_cars, parked_log))
     env.run(until=sim_duration)
-    return parked_log
+    mean_turnaround = float(np.mean(turnaround_times)) if turnaround_times else 0.0
+    return parked_log, mean_turnaround
 
 
 def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
@@ -142,16 +146,16 @@ def run_monte_carlo(iterations, open_time, close_time, minutes_before_open,
     # summarised for percentile bands.
     runs = []
     for _ in range(iterations):
-        parked_log = run_sim(
+        parked_log, mean_turnaround = run_sim(
             open_time, close_time, minutes_before_open, drop_lower,
             drop_upper, departure_mean, sim_duration, total_cars,
             wait_until_close)
         maximum_parked = max(parked for time_value, parked in parked_log)
-        runs.append((parked_log, maximum_parked))
+        runs.append((parked_log, maximum_parked, mean_turnaround))
     if not runs:
         return None, []
     median_maximum = np.median(
-        [maximum for parked_log, maximum in runs])
+        [maximum for parked_log, maximum, mean_turnaround in runs])
     median_run = min(runs, key=lambda run: abs(run[1] - median_maximum))
     return median_run, runs
 
@@ -161,12 +165,12 @@ def monte_carlo_percentiles(runs):
     # given scenario. These are shown as shaded bands around the median line.
     if not runs:
         return [], [], []
-    times = sorted({time_value for parked_log, _ in runs for time_value, _ in parked_log})
+    times = sorted({time_value for parked_log, _, _ in runs for time_value, _ in parked_log})
     lower = []
     upper = []
     for time_value in times:
         values = [
-            parked for parked_log, _ in runs
+            parked for parked_log, _, _ in runs
             for log_time, parked in parked_log
             if abs(log_time - time_value) < 1e-9
         ]
@@ -611,19 +615,25 @@ def render_comparison_tab():
                 sim_duration, wait_until_close)
             if median_run is None:
                 continue
-            median_log, maximum = median_run
+            median_log, maximum, mean_turnaround = median_run
             times = [time_value for time_value, parked in median_log]
             parked = [count for time_value, count in median_log]
             p_times, p20, p80 = monte_carlo_percentiles(all_runs)
-            results.append((name, times, parked, maximum, p_times, p20, p80))
+            results.append((name, times, parked, maximum, mean_turnaround, p_times, p20, p80))
 
         st.subheader(f"Median Run + 20/80 Percentile Bounds for {iterations} Monte Carlo Iterations")
-        metric_1, metric_2 = st.columns(2)
-        metric_1.metric(f"{results[0][0]} peak parked", f"{results[0][3]} cars")
-        metric_2.metric(f"{results[1][0]} peak parked", f"{results[1][3]} cars")
+        metric_columns = st.columns(4)
+        metric_columns[0].metric(
+            f"{results[0][0]} peak parked", f"{results[0][3]} cars")
+        metric_columns[1].metric(
+            f"{results[0][0]} mean turnaround", f"{results[0][4]:.1f} minutes")
+        metric_columns[2].metric(
+            f"{results[1][0]} peak parked", f"{results[1][3]} cars")
+        metric_columns[3].metric(
+            f"{results[1][0]} mean turnaround", f"{results[1][4]:.1f} minutes")
         if chart_mode == "Two lines on one chart":
             figure, axis = plt.subplots(figsize=(10, 5))
-            for index, (name, times, parked, maximum, p_times, p20, p80) in enumerate(results):
+            for index, (name, times, parked, maximum, mean_turnaround, p_times, p20, p80) in enumerate(results):
                 colour = f"C{index}"
                 axis.fill_between(p_times, p20, p80, color=colour, alpha=0.15)
                 axis.plot(times, parked, label=f"{name} median", color=colour, linewidth=2)
@@ -631,7 +641,7 @@ def render_comparison_tab():
             axes = (axis,)
         else:
             figure, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
-            for axis, (name, times, parked, maximum, p_times, p20, p80) in zip(axes, results):
+            for axis, (name, times, parked, maximum, mean_turnaround, p_times, p20, p80) in zip(axes, results):
                 colour = axis._get_lines[0].get_color() if axis.has_data() else None
                 axis.fill_between(p_times, p20, p80, color=colour or "C0", alpha=0.15)
                 axis.plot(times, parked, label=f"{name} median", color=colour or "C0", linewidth=2)

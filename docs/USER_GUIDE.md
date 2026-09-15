@@ -124,7 +124,12 @@ variation makes the result less predictable. A higher line or wider area means
 more cars are likely to be parked at the same time, which often indicates more
 congestion.
 
-The app also displays peak parked-car values for each scenario.
+The app also displays two KPIs for each scenario:
+
+- **Peak parked**: the highest number of parked cars in the representative run.
+- **Mean turnaround**: the average time from car arrival to the end of its
+	departure delay in the representative run. This includes any wait until the
+	gate opens and, when enabled, any wait until gate closing.
 
 ---
 
