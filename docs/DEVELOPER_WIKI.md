@@ -128,27 +128,45 @@ This function converts simulation inputs into a list of car objects with:
 
 - arrival time
 - parking duration
+- Poisson-sampled departure delay
 - x and y coordinates for drawing
 
-The cars are placed in a grid layout so they can be shown in the parking area.
+The cars are placed in two horizontal rows so the queue remains visible within the
+visualizer canvas.
 
 ### `car_times(...)`
 
 This function calculates the key moments for a car:
 
-- departure time
-- parked-end time
+- parking-end time
+- playground-entry time
+- school-entry start time
 - person-through-gate time
+- car-leave time
 
-This allows the visualizer to colour cars differently depending on their state:
+The timing rules are:
 
-- arriving
+- before gate opening, the person remains beside the car
+- at gate opening, the person enters the playground
+- people enter school at gate closing in both modes
+- when departure is not limited, the car leaves after parking and its sampled departure interval
+- when departure is limited, the car waits until the later of parking completion or gate closing, then applies its sampled departure interval
+
+This allows the visualizer to show cars and people according to their state:
+
 - parked
-- leaving
+- waiting beside a car
+- waiting in the playground
+- walking through the gate
+- in school
 
 ### `render_frame(...)`
 
-This draws a single frame of the animation. It creates an image with a road, gate, parked cars, and people moving through the gate. It also updates the text in the top-left corner to show:
+This draws a single frame of the animation. It creates an image with cars at the
+bottom, a small gate in the middle, a playground above the gate, and a school at
+the top. Cars are drawn with windows, wheels, lights, and body colour. People are
+drawn with a head, body, arms, and legs. It also updates the text in the top-left
+corner to show:
 
 - current time
 - current parked count
@@ -159,7 +177,8 @@ This draws a single frame of the animation. It creates an image with a road, gat
 This creates the time-series plot showing:
 
 - cars parked over time
-- people through the gate over time
+- people in the playground over time
+- people in school over time
 
 ---
 
@@ -192,6 +211,9 @@ It then runs Monte Carlo simulations and plots the resulting parked-car counts.
 ### Visualisation tab
 
 This page is designed to help a user understand the dynamics visually. It uses a scenario saved from the comparison tab and animates the process by looping through times in small increments.
+
+The visualiser also has a control for the random seed. People enter school
+immediately at their release time, so there is no separate gate-through delay.
 
 ---
 

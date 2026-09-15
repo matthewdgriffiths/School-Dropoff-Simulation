@@ -21,6 +21,7 @@ ROAD_RECT = (40, 80, 760, 450)
 BACKGROUND = (24, 29, 38)
 ROAD = (49, 58, 69)
 ROAD_EDGE = (130, 143, 157)
+PLAYGROUND = (69, 92, 78)
 TEXT = (235, 240, 245)
 ARRIVING = (76, 190, 232)
 PARKED = (244, 177, 68)
@@ -190,7 +191,7 @@ def visualizer_fonts():
 
 
 def create_cars(total_cars, gate_open, gate_close, arrival_window,
-                drop_lower, drop_upper, departure_mean, walk_time, seed):
+                drop_lower, drop_upper, departure_mean, seed):
     # Generate the data for each car in the visual simulation: when it arrives,
     # how long it stays parked, how long it takes to clear the space, and where
     # to draw it on the screen.
@@ -211,26 +212,28 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
             "arrival": arrival,
             "duration": rng.uniform(drop_lower, drop_upper),
             "departure_time": max(1.0, float(np.random.poisson(departure_mean))),
-            "walk_time": walk_time,
             "x": ROAD_RECT[0] + 35 + column * queue_spacing,
             "y": queue_y - 32 + row * 64,
+            "playground_x": ROAD_RECT[0] + 35 + column * queue_spacing,
+            "playground_y": ROAD_RECT[1] + 58 + row * 20,
             "half_width": max(8, min(21, queue_spacing * 0.42)),
         })
     return cars
 
 
 def car_times(car_data, gate_open, gate_close, wait_until_close):
-    # A car starts parking immediately when it arrives. It cannot leave before
-    # the gate opens; if departure is limited, it remains parked until closing.
-    # The vehicle then spends a configurable departure interval before the
-    # person walks to the gate.
+    # A car starts parking immediately when it arrives. People enter the
+    # playground after opening and wait there until closing. In normal mode the
+    # car can leave after parking and its departure interval; limited mode holds
+    # the car until closing before applying that interval.
     arrival = car_data["arrival"]
-    parked_end = max(arrival + car_data["duration"], gate_open)
-    if wait_until_close:
-        parked_end = max(parked_end, gate_close)
-    departure_end = parked_end + car_data["departure_time"]
-    person_through = departure_end + car_data["walk_time"]
-    return arrival, parked_end, departure_end, person_through
+    parked_end = arrival + car_data["duration"]
+    playground_enter = max(parked_end, gate_open)
+    walk_start = max(playground_enter, gate_close)
+    person_through = walk_start
+    car_departure_start = max(parked_end, gate_close) if wait_until_close else parked_end
+    car_leave = car_departure_start + car_data["departure_time"]
+    return arrival, parked_end, playground_enter, walk_start, person_through, car_leave
 
 
 def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
@@ -240,36 +243,101 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
     draw = ImageDraw.Draw(surface)
     draw.rounded_rectangle(ROAD_RECT, radius=8, fill=ROAD, outline=ROAD_EDGE, width=3)
     gate_x = (ROAD_RECT[0] + ROAD_RECT[2]) // 2
-    gate_y = ROAD_RECT[1] + 18
-    draw.line((gate_x - 26, gate_y, gate_x + 26, gate_y), fill=GATE, width=5)
-    draw.text((gate_x - 20, ROAD_RECT[1] - 26), "GATE", font=fonts[1], fill=GATE)
+    gate_y = ROAD_RECT[1] + 110
+    school_rect = (gate_x - 82, ROAD_RECT[1] + 4, gate_x + 82, ROAD_RECT[1] + 42)
+    draw.rounded_rectangle(school_rect, radius=6, fill=(82, 105, 132), outline=TEXT, width=2)
+    draw.polygon(
+        [(gate_x - 92, ROAD_RECT[1] + 5),
+         (gate_x, ROAD_RECT[1] - 14),
+         (gate_x + 92, ROAD_RECT[1] + 5)],
+        fill=(154, 76, 76), outline=TEXT)
+    draw.text((gate_x - 30, ROAD_RECT[1] + 17), "SCHOOL", font=fonts[1], fill=TEXT)
+    draw.rounded_rectangle(
+        (ROAD_RECT[0] + 18, ROAD_RECT[1] + 48,
+         ROAD_RECT[2] - 18, ROAD_RECT[1] + 90),
+        radius=6, fill=PLAYGROUND, outline=ROAD_EDGE, width=2)
+    draw.text(
+        (ROAD_RECT[0] + 28, ROAD_RECT[1] + 52),
+        "PLAYGROUND", font=fonts[1], fill=TEXT)
+    draw.line((gate_x - 34, gate_y, gate_x + 34, gate_y), fill=GATE, width=4)
+    draw.text((gate_x - 20, gate_y - 18), "GATE", font=fonts[1], fill=GATE)
 
     parked_count = 0
+    playground_count = 0
+    school_count = 0
     people_through = 0
     for car_data in cars:
-        arrival, parked_end, departure_end, person_through = car_times(
+        arrival, parked_end, playground_enter, walk_start, person_through, car_leave = car_times(
             car_data, gate_open, gate_close, wait_until_close)
         if elapsed < arrival:
             continue
         if elapsed >= person_through:
             people_through += 1
-            continue
-        if elapsed < parked_end:
-            colour = PARKED
+            school_count += 1
+        if playground_enter <= elapsed < walk_start:
+            playground_count += 1
+        if elapsed < car_leave:
             parked_count += 1
+            colour = PARKED
+            car_rect = (
+                int(car_data["x"] - car_data["half_width"]), int(car_data["y"] - 11),
+                int(car_data["x"] + car_data["half_width"]), int(car_data["y"] + 11))
+            car_left, car_top, car_right, car_bottom = car_rect
+            draw.rounded_rectangle(car_rect, radius=5, fill=colour, outline=TEXT, width=2)
+            car_width = car_right - car_left
+            if car_width >= 22:
+                window_top = car_top + 3
+                window_bottom = car_top + 9
+                window_left = car_left + max(5, int(car_width * 0.24))
+                window_right = car_right - max(5, int(car_width * 0.24))
+                draw.polygon(
+                    [(window_left, window_bottom),
+                     (window_left + max(4, car_width // 8), window_top),
+                     (window_right - max(4, car_width // 8), window_top),
+                     (window_right, window_bottom)],
+                    fill=(68, 91, 112), outline=TEXT)
+                wheel_radius = 4
+                for wheel_x in (car_left + 8, car_right - 8):
+                    draw.ellipse(
+                        (wheel_x - wheel_radius, car_bottom - 3,
+                         wheel_x + wheel_radius, car_bottom + 5),
+                        fill=(20, 23, 28), outline=TEXT)
+                draw.ellipse(
+                    (car_right - 4, car_top + 5, car_right, car_top + 9),
+                    fill=(255, 235, 150))
+                draw.ellipse(
+                    (car_left, car_top + 5, car_left + 4, car_top + 9),
+                    fill=(220, 75, 75))
+        if parked_end <= elapsed < playground_enter:
+            person_x = car_data["x"]
+            person_y = car_data["y"] - 15
+        elif playground_enter <= elapsed < walk_start:
+            person_x = car_data["playground_x"]
+            person_y = car_data["playground_y"]
         else:
-            colour = LEAVING
-        car_rect = (
-            int(car_data["x"] - car_data["half_width"]), int(car_data["y"] - 11),
-            int(car_data["x"] + car_data["half_width"]), int(car_data["y"] + 11))
-        draw.rounded_rectangle(car_rect, radius=5, fill=colour, outline=TEXT, width=2)
-        if departure_end <= elapsed < person_through:
-            progress = (elapsed - departure_end) / car_data["walk_time"]
-            person_x = car_data["x"] + (gate_x - car_data["x"]) * progress
-            person_y = car_data["y"] + (gate_y - car_data["y"]) * progress
+            person_x = None
+            person_y = None
+        if person_x is not None:
+            person_x = int(person_x)
+            person_y = int(person_y)
             draw.ellipse(
-                (int(person_x - 6), int(person_y - 6),
-                 int(person_x + 6), int(person_y + 6)), fill=PERSON)
+                (person_x - 4, person_y - 13, person_x + 4, person_y - 5),
+                fill=PERSON, outline=TEXT)
+            draw.line(
+                (person_x, person_y - 5, person_x, person_y + 6),
+                fill=PERSON, width=3)
+            draw.line(
+                (person_x, person_y - 1, person_x - 6, person_y + 3),
+                fill=PERSON, width=2)
+            draw.line(
+                (person_x, person_y - 1, person_x + 6, person_y + 3),
+                fill=PERSON, width=2)
+            draw.line(
+                (person_x, person_y + 6, person_x - 4, person_y + 12),
+                fill=PERSON, width=2)
+            draw.line(
+                (person_x, person_y + 6, person_x + 4, person_y + 12),
+                fill=PERSON, width=2)
 
     draw.text((40, 25), "School Drop-Off Parking", font=fonts[0], fill=TEXT)
     draw.text(
@@ -277,16 +345,18 @@ def render_frame(cars, elapsed, gate_open, gate_close, wait_until_close,
         f"Time: {format_clock_time(start_time, elapsed)}   Parked: {parked_count}   "
         f"People through gate: {people_through}",
         font=fonts[1], fill=TEXT)
-    return surface, parked_count, people_through
+    return surface, parked_count, playground_count, school_count
 
 
 def make_visualizer_chart(history, simulation_start):
     figure, axis = plt.subplots(figsize=(7, 4))
     times = [item[0] for item in history]
     parked = [item[1] for item in history]
-    through = [item[2] for item in history]
+    playground = [item[2] for item in history]
+    school = [item[3] for item in history]
     axis.plot(times, parked, color="#f4b142", label="Cars parked")
-    axis.plot(times, through, color="#74d793", label="People through gate")
+    axis.plot(times, playground, color="#8fd694", label="People in playground")
+    axis.plot(times, school, color="#8db9f2", label="People in school")
     axis.xaxis.set_major_formatter(
         FuncFormatter(
             lambda value, position: format_clock_time(simulation_start, value)))
@@ -334,10 +404,6 @@ def render_visualizer_tab():
     gate_close = time_to_minutes(scenario["close"]) - time_to_minutes(simulation_start)
     wait_until_close = scenario["wait_until_close"]
     seed = st.number_input("Random seed", min_value=0, value=42, step=1)
-    walk_time = st.number_input(
-        "Time for people to get through the gate (minutes)",
-        min_value=0.5, max_value=15.0, value=2.0, step=0.5,
-        key="visualizer_walk_time")
 
     st.caption(
         f"{selected_name}: parking {drop_lower:g}-{drop_upper:g} minutes, "
@@ -348,7 +414,7 @@ def render_visualizer_tab():
     if st.button("Run visualization", type="primary"):
         cars = create_cars(
             total_cars, gate_open, gate_close, arrival_window,
-            drop_lower, drop_upper, departure_mean, walk_time, seed)
+            drop_lower, drop_upper, departure_mean, seed)
         fonts = visualizer_fonts()
         frame_slot, chart_slot = st.columns(2)
         frame_output = frame_slot.empty()
@@ -356,14 +422,14 @@ def render_visualizer_tab():
         history = []
         max_time = max(
             gate_close,
-            max(car_times(car_data, gate_open, gate_close, wait_until_close)[3]
+            max(car_times(car_data, gate_open, gate_close, wait_until_close)[5]
                 for car_data in cars))
         elapsed = 0.0
         while elapsed <= max_time:
-            frame, parked_count, people_through = render_frame(
+            frame, parked_count, playground_count, school_count = render_frame(
                 cars, elapsed, gate_open, gate_close, wait_until_close,
                 simulation_start, fonts)
-            history.append((elapsed, parked_count, people_through))
+            history.append((elapsed, parked_count, playground_count, school_count))
             frame_output.image(frame, use_container_width=True)
             figure = make_visualizer_chart(history, simulation_start)
             chart_output.pyplot(figure, clear_figure=True)
@@ -517,7 +583,10 @@ st.info(
     "sampled parking duration, then its departure delay is sampled from a Poisson "
     "distribution using the shared departure mean. The comparison tab repeats "
     "this process with Monte Carlo simulations and shows a representative central "
-    "occupancy run with 20th- and 80th-percentile bounds."
+    "occupancy run with 20th- and 80th-percentile bounds. People enter the "
+    "playground after opening and school at closing. Normally, cars can depart "
+    "after their parking and departure delays; when **Limit car departure until "
+    "gate closing** is enabled, cars wait until closing before departing."
 )
 comparison_tab, visualizer_tab = st.tabs(["Two-scenario comparison", "Visualisation"])
 with comparison_tab:

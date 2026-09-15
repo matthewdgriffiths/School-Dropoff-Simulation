@@ -72,7 +72,25 @@ This value tells the app how many random simulation runs to test. More runs usua
 
 ### B. Visualisation
 
-This tab shows a simple animation of the parking area. It is helpful for understanding the flow of cars and people through the gate.
+This tab shows an animation of the drop-off area. Cars are shown in two rows at
+the bottom, with a small gate between the cars and the playground. The school is
+shown above the playground.
+
+The animation shows people remaining beside their cars before the gate opens.
+Once the gate opens, they enter the playground and wait until gate closing before
+entering school. In normal mode, the car can leave after its parking and sampled
+departure delays. With departure limited until gate closing, the car waits until
+the later of parking completion or gate closing, then applies its departure delay.
+
+The visualiser chart shows three lines:
+
+- cars parked
+- people in the playground
+- people in school
+
+People enter school immediately when released, so there is no separate
+gate-through delay to configure. The car still uses its sampled departure
+interval after release.
 
 ---
 
@@ -97,8 +115,11 @@ The model is built around a few assumptions:
 - cars begin arriving `arrival_window` minutes before the gate opens, and can continue arriving until the gate closes
 - the overall arrival pattern is spread throughout that full period using a Poisson-style distribution of car arrivals
 - each car stays for a random parking duration sampled between the chosen lower and upper bounds
-- cars can leave once their parking time ends, unless the "Limit car departure until gate closing" option is checked
-- passengers then walk through the gate after parking ends
+- before gate opening, people remain with their cars and cannot enter the playground
+- after gate opening, people can enter the playground
+- people enter school at gate closing
+- without limited departure, cars leave after parking and their sampled departure delays
+- with "Limit car departure until gate closing" enabled, cars wait until closing before their departure delays begin
 
 This means the results are best used for comparing relative scenarios rather than predicting exact real-world traffic with perfect accuracy.
 
