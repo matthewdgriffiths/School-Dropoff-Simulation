@@ -40,14 +40,14 @@ http://localhost:8501
 
 ## Interface overview
 
-The app opens on the **Guide** tab. It explains the model, its logic, the chart
-bounds, and how to run the simulation. Use these links to jump to the working
-parts of the app:
+The app opens on the **Two-scenario comparison** tab. The **Guide** tab explains
+the model, its logic, the chart bounds, and how to run the simulation. Use these
+links to jump to the working parts of the app:
 
 - [Two-scenario comparison](#a-two-scenario-comparison)
 - [Visualisation](#b-visualisation)
 
-The app then has two working tabs:
+The app has two working tabs followed by the guide:
 
 ### A. Two-scenario comparison
 

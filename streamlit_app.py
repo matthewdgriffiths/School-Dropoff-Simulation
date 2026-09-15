@@ -376,10 +376,6 @@ def render_guide_tab():
         "Use the controls to change the model parameters, run the simulation, "
         "and compare how many cars are parked over time.")
 
-    st.markdown(
-        "[Go to Two-Scenario Comparison](#two-scenario-comparison)  |  "
-        "[Go to Parking Visualizer](#parking-visualizer)")
-
     st.subheader("What the app does")
     st.write(
         "Cars arrive at random times between the start of the arrival window "
@@ -520,7 +516,7 @@ def render_comparison_tab():
     # Each setup changes the parking duration, gate opening/closing times, and
     # whether cars wait until the gate closes before leaving.
     st.header("Two-Scenario Comparison")
-    st.write("Compare parked-car occupancy for two scenarios using Monte Carlo median runs.")
+    st.write(" This tab lets the user compare two different school drop-off setups. Each setup changes the parking duration, gate opening/closing times, and whether cars wait until the gate closes before leaving.")
     iterations = st.number_input("Monte Carlo iterations", min_value=1, value=100, step=1,
                                  key="comparison_iterations")
     st.subheader("Shared Settings")
@@ -658,11 +654,11 @@ st.info(
     "after their parking and departure delays. However, when **Limit car departure until "
     "gate closing** is enabled, cars wait until the gate closes before their departure is simulated."
 )
-guide_tab, comparison_tab, visualizer_tab = st.tabs(
-    ["Guide", "Two-scenario comparison", "Visualisation"])
-with guide_tab:
-    render_guide_tab()
+comparison_tab, visualizer_tab, guide_tab = st.tabs(
+    ["Two-scenario comparison", "Visualisation", "Guide"])
 with comparison_tab:
     render_comparison_tab()
 with visualizer_tab:
     render_visualizer_tab()
+with guide_tab:
+    render_guide_tab()
