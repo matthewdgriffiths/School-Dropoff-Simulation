@@ -149,7 +149,7 @@ The timing rules are:
 - before gate opening, the person remains beside the car
 - at gate opening, the person enters the playground
 - people enter school at gate closing in both modes
-- when departure is not limited, the car leaves after parking and its sampled departure interval
+- when departure is not limited, the car leaves after both parking has finished and the gate has opened, followed by its sampled departure interval
 - when departure is limited, the car waits until the later of parking completion or gate closing, then applies its sampled departure interval
 
 This allows the visualizer to show cars and people according to their state:

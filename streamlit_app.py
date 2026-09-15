@@ -224,14 +224,17 @@ def create_cars(total_cars, gate_open, gate_close, arrival_window,
 def car_times(car_data, gate_open, gate_close, wait_until_close):
     # A car starts parking immediately when it arrives. People enter the
     # playground after opening and wait there until closing. In normal mode the
-    # car can leave after parking and its departure interval; limited mode holds
-    # the car until closing before applying that interval.
+    # car can leave after parking and its departure interval, but never before
+    # opening; limited mode holds the car until closing before applying that
+    # interval.
     arrival = car_data["arrival"]
     parked_end = arrival + car_data["duration"]
     playground_enter = max(parked_end, gate_open)
     walk_start = max(playground_enter, gate_close)
     person_through = walk_start
-    car_departure_start = max(parked_end, gate_close) if wait_until_close else parked_end
+    car_departure_start = max(parked_end, gate_open)
+    if wait_until_close:
+        car_departure_start = max(car_departure_start, gate_close)
     car_leave = car_departure_start + car_data["departure_time"]
     return arrival, parked_end, playground_enter, walk_start, person_through, car_leave
 
@@ -478,7 +481,7 @@ def render_visualizer_tab():
         f"{selected_name}: parking {drop_lower:g}-{drop_upper:g} minutes, "
         f"car departure mean {departure_mean:g} minutes, "
         f"gate {scenario['open'].strftime('%H:%M')}-{scenario['close'].strftime('%H:%M')}, "
-        f"{'departure held until closing' if wait_until_close else 'departure at opening'}.")
+        f"{'departure held until closing' if wait_until_close else 'departure after opening'}.")
 
     if st.button("Run visualization", type="primary"):
         cars = create_cars(

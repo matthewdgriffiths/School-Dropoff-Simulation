@@ -138,7 +138,7 @@ The model is built around a few assumptions:
 - before gate opening, people remain with their cars and cannot enter the playground
 - after gate opening, people can enter the playground
 - people enter school at gate closing
-- without limited departure, cars leave after parking and their sampled departure delays
+- without limited departure, cars leave after both parking has finished and the gate has opened, followed by their sampled departure delays
 - with "Limit car departure until gate closing" enabled, cars wait until closing before their departure delays begin
 
 This means the results are best used for comparing relative scenarios rather than predicting exact real-world traffic with perfect accuracy.
